@@ -135,7 +135,9 @@ class Element_Pie_Chart extends Element {
 	public function render() {
 		$settings = $this->settings;
 
-		$this->set_attribute( '_root', 'data-percent', $settings['percent'] );
+		if ( isset( $settings['percent'] ) ) {
+			$this->set_attribute( '_root', 'data-percent', $settings['percent'] );
+		}
 
 		if ( ! empty( $settings['scaleColor']['rgb'] ) ) {
 			$scale_color = $settings['scaleColor']['rgb'];
@@ -203,22 +205,28 @@ class Element_Pie_Chart extends Element {
 		// Render
 		echo "<div {$this->render_attributes( '_root' )}>";
 
-		$content = ! empty( $this->settings['content'] ) ? $this->settings['content'] : false;
+		$content = ! empty( $settings['content'] ) ? $settings['content'] : false;
 
 		if ( $content ) {
 			echo '<span class="content">';
 
 			switch ( $content ) {
 				case 'percent':
-					echo "{$this->settings['percent']}%";
+					if ( isset( $settings['percent'] ) ) {
+						echo "{$settings['percent']}%";
+					}
 					break;
 
 				case 'icon':
-					echo isset( $settings['icon'] ) ? self::render_icon( $settings['icon'] ) : '';
+					if ( isset( $settings['icon'] ) ) {
+						echo self::render_icon( $settings['icon'] );
+					}
 					break;
 
 				case 'text':
-					echo "<span>{$this->settings['text']}</span>";
+					if ( isset( $settings['text'] ) ) {
+						echo "<span>{$settings['text']}</span>";
+					}
 					break;
 			}
 

@@ -61,7 +61,7 @@ class Filter_Search extends Filter_Element {
 
 		// Icon (Clear)
 		$this->controls['iconSep'] = [
-			'label' => esc_html__( 'Icon', 'bricks' ) . ' ( ' . esc_html__( 'Clear', 'bricks' ) . ')',
+			'label' => esc_html__( 'Icon', 'bricks' ) . ' (' . esc_html__( 'Clear', 'bricks' ) . ')',
 			'type'  => 'separator',
 		];
 

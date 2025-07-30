@@ -16,6 +16,11 @@ class Polylang {
 			return;
 		}
 
+		if ( \Bricks\Maintenance::get_mode() ) {
+			// Modify Polylang language switcher post ID when in maintenance mode (@since 2.0)
+			add_filter( 'pll_the_languages_args', [ $this, 'modify_language_switcher_post_id' ] );
+		}
+
 		add_action( 'init', [ $this, 'init_elements' ] );
 
 		add_filter( 'bricks/helpers/get_posts_args', [ $this, 'polylang_get_posts_args' ] );
@@ -23,7 +28,11 @@ class Polylang {
 
 		add_action( 'wp_enqueue_scripts', [ $this, 'wp_enqueue_scripts' ] );
 
+		// Choose which Bricks post metas to copy when duplicating a post
 		add_filter( 'pll_copy_post_metas', [ $this, 'copy_bricks_post_metas' ], 10, 3 );
+
+		// Modify Bricks IDs when copying post metas (@since 1.12.2)
+		// add_filter( 'pll_translate_post_meta', [ $this, 'unique_bricks_ids' ], 10, 2 );
 
 		add_filter( 'bricks/search_form/home_url', [ $this, 'modify_search_form_home_url' ] );
 
@@ -31,14 +40,28 @@ class Polylang {
 
 		// Add language code to term name (@since 1.11)
 		add_filter( 'bricks/builder/term_name', [ $this, 'add_language_to_term_name' ], 10, 3 );
+		add_filter( 'bricks/get_terms_options/excluded_taxonomies', [ $this, 'term_list_exclude_taxonomy' ], 10 );
 
 		// Add language parameter to query args (@since 1.9.9)
 		add_filter( 'bricks/posts/query_vars', [ $this, 'add_language_query_var' ], 100, 3 );
 		add_filter( 'bricks/get_templates/query_vars', [ $this, 'add_template_language_query_var' ], 100 );
 		add_filter( 'bricks/get_templates_query/cache_key', [ $this, 'add_template_language_cache_key' ] );
+		add_filter( 'bricks/database/get_all_templates_cache_key', [ $this, 'get_all_templates_cache_key' ] );
+		add_filter( 'bricks/database/bricks_get_all_templates_by_type_args', [ $this, 'polylang_get_all_templates_args' ] );
 
 		// Add language code to populate correct export template link (@since 1.10)
 		add_filter( 'bricks/export_template_args', [ $this, 'add_export_template_arg' ], 10, 2 );
+
+		// Reassign filter element IDs for translated posts (fix DB AJAX) (@since 1.12.2)
+		add_filter( 'bricks/fix_filter_element_db', [ $this, 'fix_filter_element_db' ], 10, 3 );
+
+		// Add language code to filter element data (@since 1.12.2)
+		add_filter( 'bricks/query_filters/element_data', [ $this, 'set_filter_element_language' ], 10, 3 );
+
+		// Swicth locale for Bricks API requests (@since 2.0)
+		add_action( 'bricks/render_query_result/start', [ $this, 'switch_locale' ] );
+		add_action( 'bricks/render_query_page/start', [ $this, 'switch_locale' ] );
+		add_action( 'bricks/render_popup_content/start', [ $this, 'switch_locale' ] );
 	}
 
 	/**
@@ -92,6 +115,44 @@ class Polylang {
 		}
 
 		return $args;
+	}
+
+	/**
+	 * Add current language to cache key
+	 * Unable to use get_locale() in API endpoint
+	 *
+	 * @since 1.12.2
+	 */
+	public function get_all_templates_cache_key( $cache_key ) {
+		// Retrieve the current language on page load
+		$current_lang = self::get_current_language();
+
+		// Use Database::$page_data['language'] if set (API request)
+		if ( isset( Database::$page_data['language'] ) && ! empty( Database::$page_data['language'] ) ) {
+			$current_lang = sanitize_key( Database::$page_data['language'] );
+		}
+
+		return $current_lang . "_$cache_key";
+	}
+
+	/**
+	 * Add language query var when getting all templates (database.php)
+	 *
+	 * @since 1.12.2
+	 */
+	public function polylang_get_all_templates_args( $query_args ) {
+		// Retrieve the current language on page load
+		$current_lang = self::get_current_language();
+
+		// Use Database::$page_data['language'] if set (API request)
+		if ( isset( Database::$page_data['language'] ) && ! empty( Database::$page_data['language'] ) ) {
+			$current_lang = sanitize_key( Database::$page_data['language'] );
+		}
+
+		// Set the language query var
+		$query_args['lang'] = $current_lang;
+
+		return $query_args;
 	}
 
 	/**
@@ -188,6 +249,20 @@ class Polylang {
 	}
 
 	/**
+	 * Modify Bricks IDs when translating/copy post meta
+	 *
+	 * @since 1.12.2
+	 */
+	public function unique_bricks_ids( $value, $meta_key ) {
+		if ( ! in_array( $meta_key, [ BRICKS_DB_PAGE_HEADER, BRICKS_DB_PAGE_CONTENT, BRICKS_DB_PAGE_FOOTER ], true ) ) {
+			return $value;
+		}
+
+		// Ensure each Bricks ID is unique
+		return \Bricks\Helpers::generate_new_element_ids( $value );
+	}
+
+	/**
 	 * Init Polylang elements
 	 *
 	 * polylang-language-switcher
@@ -260,8 +335,6 @@ class Polylang {
 	 * @since 1.9.4
 	 */
 	public function add_langugage_to_post_title( $title, $page_id ) {
-		\Bricks\Ajax::verify_nonce( 'bricks-nonce-builder' );
-
 		if ( isset( $_GET['addLanguageToPostTitle'] ) ) {
 			$language_code = self::get_post_language_code( $page_id );
 			$language_code = ! empty( $language_code ) ? strtoupper( $language_code ) : '';
@@ -335,5 +408,98 @@ class Polylang {
 		}
 
 		return null;
+	}
+
+	/**
+	 * Reassign new IDs for filter elements when fixing the filter element DB
+	 *
+	 * @since 1.12.2
+	 */
+	public function fix_filter_element_db( $handled, $post_id, $template_type ) {
+		$language_code = self::get_post_language_code( $post_id );
+
+		if ( empty( $language_code ) ) {
+			return $handled;
+		}
+
+		$default_language = pll_default_language( 'slug' );
+
+		// If default language, skip
+		if ( $language_code === $default_language ) {
+			return $handled;
+		}
+
+		// We need to reassign new IDs for filter elements
+		$filter_elements = \Bricks\Query_Filters::filter_controls_elements();
+
+		// Ensure each Filter element Bricks ID is unique
+		$bricks_elements = Database::get_data( $post_id, $template_type );
+
+		$bricks_elements = \Bricks\Helpers::generate_new_element_ids( $bricks_elements, $filter_elements );
+
+		// Update the post meta with the new elements, will auto update custom element DB and reindex
+		update_post_meta( $post_id, Database::get_bricks_data_key( $template_type ), $bricks_elements );
+
+		// Return true to indicate the filter element DB has been handled
+		return true;
+	}
+
+	/**
+	 * Insert language code into the element settings
+	 *
+	 * @since 1.12.2
+	 */
+	public function set_filter_element_language( $data, $element, $post_id ) {
+		// Get the language code of the post
+		$language_code = self::get_post_language_code( $post_id );
+
+		if ( empty( $language_code ) ) {
+			return $data;
+		}
+
+		// Insert the language code into the element settings
+		$data['language'] = $language_code;
+
+		return $data;
+	}
+
+	/**
+	 * Exclude the language taxonomy from the term list
+	 * - Remove pll_xxxx term options from the term list in the builder
+	 *
+	 * @since 2.0
+	 */
+	public function term_list_exclude_taxonomy( $excluded_taxonomies ) {
+		$excluded_taxonomies[] = 'post_translations';
+		$excluded_taxonomies[] = 'term_translations';
+
+		return $excluded_taxonomies;
+	}
+
+	/**
+	 * Switch the locale for Bricks API requests
+	 *
+	 * @since 2.0
+	 */
+	public function switch_locale( $request_data ) {
+		if ( ! empty( Database::$page_data['language'] ) && function_exists( 'pll_current_language' ) ) {
+			// Polylang alreay set the language based on the request
+			$locale = pll_current_language( 'locale' );
+			if ( $locale ) {
+				// Switch the locale to the current language
+				switch_to_locale( $locale );
+			}
+		}
+	}
+
+	/**
+	 * Modify the Polylang modify_language_switcher_post_id post ID when in maintenance mode
+	 *
+	 * @since 2.0
+	 */
+	public function modify_language_switcher_post_id( $args ) {
+		$args['post_id'] = \Bricks\Maintenance::get_original_post_id() ?? $args['post_id'];
+
+		return $args;
 	}
 }

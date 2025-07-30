@@ -27,6 +27,7 @@ class Element_Svg extends Element {
 				''            => esc_html__( 'File', 'bricks' ),
 				'dynamicData' => esc_html__( 'Dynamic data', 'bricks' ),
 				'code'        => esc_html__( 'Code', 'bricks' ),
+				'iconSet'     => esc_html__( 'Icon set', 'bricks' ),
 			],
 		];
 
@@ -35,11 +36,19 @@ class Element_Svg extends Element {
 			'required' => [ 'source', '=', '' ],
 		];
 
+		$this->controls['iconSet'] = [
+			'label'     => esc_html__( 'Icon set', 'bricks' ),
+			'type'      => 'icon',
+			'inline'    => true,
+			'libraries' => 'custom',
+			'required'  => [ 'source', '=', 'iconSet' ],
+		];
+
 		$this->controls['dynamicData'] = [
 			'label'    => esc_html__( 'Dynamic data', 'bricks' ),
 			'type'     => 'text',
 			'inline'   => true,
-			'desc'     => esc_html__( 'Supported field types', 'bricks' ) . ': ' . esc_html__( 'File', 'bricks' ) . ', ' . esc_html__( 'Image', 'bricks' ),
+			'desc'     => esc_html__( 'Supported field types', 'bricks' ) . ': ' . esc_html__( 'File', 'bricks' ) . ', ' . esc_html__( 'Image', 'bricks' ) . ', ' . esc_html__( 'SVG code', 'bricks' ),
 			'required' => [ 'source', '=', 'dynamicData' ],
 		];
 
@@ -64,7 +73,11 @@ class Element_Svg extends Element {
 		// Code execution disabled
 		else {
 			$this->controls['codeExecutionNotAllowedInfo'] = [
-				'content'  => esc_html__( 'Code execution not allowed.', 'bricks' ) . ' ' . esc_html__( 'You can manage code execution permissions under: Bricks > Settings > Builder Access > Code Execution', 'bricks' ),
+				// translators: %s: 'Bricks settings path'
+				'content'  => esc_html__( 'Code execution not allowed.', 'bricks' ) . ' ' . sprintf(
+					esc_html__( 'You can manage code execution permissions under: %s', 'bricks' ),
+					'Bricks > ' . esc_html__( 'Settings', 'bricks' ) . ' > ' . esc_html__( 'Custom code', 'bricks' ) . ' > ' . esc_html__( 'Code execution', 'bricks' )
+				),
 				'type'     => 'info',
 				'required' => [ 'source', '=', 'code' ],
 			];
@@ -147,15 +160,39 @@ class Element_Svg extends Element {
 			$svg      = $svg_path ? Helpers::file_get_contents( $svg_path ) : false;
 		}
 
+		// Get SVG from icon set
+		if ( $source === 'iconSet' && ! empty( $settings['iconSet']['svg']['id'] ) ) {
+			$svg_path = get_attached_file( $settings['iconSet']['svg']['id'] );
+			$svg      = $svg_path ? Helpers::file_get_contents( $svg_path ) : false;
+		}
+
 		// Get SVG from dynamic data
 		if ( $source === 'dynamicData' && ! empty( $settings['dynamicData'] ) ) {
 			$svg_data = $this->render_dynamic_data_tag( $settings['dynamicData'], 'image' );
-			$file_id  = ! empty( $svg_data[0] ) && is_numeric( $svg_data[0] ) ? $svg_data[0] : false;
 
-			if ( $file_id ) {
-				$svg_path = get_attached_file( $file_id );
+			$file = false;
+
+			// Check if $svg_data is already an SVG code (@since 2.0)
+			if ( Helpers::is_valid_svg( $svg_data ) ) {
+				$file = $svg_data;
+			}
+			else {
+				// Get dynamic tag content (@since 2.0)
+				$file = ! empty( $svg_data[0] ) ? $svg_data[0] : false;
+			}
+
+			// STEP: Check if we have a valid file ID
+			if ( $file && is_numeric( $file ) ) {
+				$svg_path = get_attached_file( $file );
 				$svg      = $svg_path ? Helpers::file_get_contents( $svg_path ) : false;
 			}
+
+			// STEP: If not a file ID, check if the file is SVG
+			// To support "icon" dynamic tags that returns SVG #86c1bpp6y (@since 2.0)
+			elseif ( ! $svg && Helpers::is_valid_svg( $file ) ) {
+				$svg = $file;
+			}
+
 		}
 
 		// STEP: Get SVG HTML from Code element
@@ -198,6 +235,11 @@ class Element_Svg extends Element {
 			}
 		}
 
+		// Maybe imported template without importing images. Try to get from placeholder (@since 1.12.2)
+		if ( ! $svg && isset( $settings['file']['path'] ) && $settings['file']['path'] !== '' ) {
+			$svg = Helpers::file_get_contents( $settings['file']['path'] );
+		}
+
 		// Return: No SVG
 		if ( ! $svg ) {
 			return $this->render_element_placeholder( [ 'title' => esc_html__( 'No SVG selected.', 'bricks' ) ] );
@@ -226,6 +268,9 @@ class Element_Svg extends Element {
 		// Linked SVG
 		if ( $link ) {
 			$this->set_link_attributes( 'link', $link );
+
+			// Add custom class to the link wrapper so we can target it in CSS (@since 2.0)
+			$this->set_attribute( 'link', 'class', 'bricks-link-wrapper' );
 
 			// Add custom attributes to the link instead of the icon
 			$output .= "<a {$this->render_attributes( 'link', true )}>";

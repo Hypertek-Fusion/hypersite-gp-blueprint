@@ -19,10 +19,10 @@ class Element_Container extends Element {
 	}
 
 	public function set_controls() {
-		if ( bricks_is_builder() && ! Capabilities::current_user_has_full_access() ) {
+		if ( bricks_is_builder() && ! Builder_Permissions::user_has_permission( 'access_element_content' ) ) {
 			$this->controls['infoNoAccess'] = [
 				'type'       => 'info',
-				'content'    => esc_html__( 'Your builder access level doesn\'t allow you modify these settings.', 'bricks' ),
+				'content'    => esc_html__( 'Your builder capability doesn\'t allow you to access these settings.', 'bricks' ),
 				'fullAccess' => false,
 			];
 		}
@@ -75,7 +75,11 @@ class Element_Container extends Element {
 		 *
 		 * Enable for elements: Container, Block, Div and Section (@since 1.8)
 		 */
-		if ( Capabilities::current_user_has_full_access() && in_array( $this->name, [ 'section', 'container', 'block', 'div' ] ) ) {
+		if (
+			bricks_is_builder() &&
+			Builder_Permissions::user_has_permission( 'access_query_loop_builder' ) &&
+			in_array( $this->name, [ 'section', 'container', 'block', 'div' ] )
+		) {
 			$this->controls = array_replace_recursive( $this->controls, $this->get_loop_builder_controls() );
 
 			$this->controls['loopSeparator'] = [
@@ -657,6 +661,27 @@ class Element_Container extends Element {
 	}
 
 	/**
+	 * Parses video URL or ID
+	 *
+	 * Input: Video ID: Return ID as is
+	 * Input: Video URL: Return escaped URL
+	 *
+	 * @since 1.12.2
+	 */
+	private function parse_video_url_or_id( $input ) {
+		// Remove whitespace
+		$input = trim( $input );
+
+		// Return video URL
+		if ( filter_var( $input, FILTER_VALIDATE_URL ) ) {
+			return esc_url( $input );
+		}
+
+		// Return video ID
+		return esc_attr( $input );
+	}
+
+	/**
 	 * Return background video HTML
 	 */
 	public function get_background_video_html( $settings ) {
@@ -672,8 +697,11 @@ class Element_Container extends Element {
 			}
 
 			if ( $video_url ) {
+
+				$video_url = $this->parse_video_url_or_id( $video_url );
+
 				$attributes[] = 'class="bricks-background-video-wrapper bricks-lazy-video"';
-				$attributes[] = 'data-background-video-url="' . esc_url( $video_url ) . '"';
+				$attributes[] = 'data-background-video-url="' . $video_url . '"';
 
 				if ( ! empty( $background['videoScale'] ) ) {
 					$attributes[] = 'data-background-video-scale="' . $background['videoScale'] . '"';
@@ -759,80 +787,32 @@ class Element_Container extends Element {
 
 			// Is component: Generate random ID for component instance (@since 1.12)
 			if ( ! empty( $element['instanceId'] ) && ! empty( $element['parentComponent'] ) ) {
-				$element['id'] .= ':' . $element['instanceId'];
+				$element['id'] .= '-' . $element['instanceId']; // Use dash instead of colon (@since 1.12.2)
 			}
 
 			$query = new \Bricks\Query( $element );
 
 			remove_filter( 'bricks/posts/query_vars', [ $this, 'maybe_set_preview_query' ], 10, 3 );
 
-			// Prevent endless loop
-			unset( $element['settings']['hasLoop'] );
+			// Prevent endless loop (@since 2.0; #86c3qwrm6)
+			$element['looped'] = true;
 
-			// Prevent endless loop for component (@since 1.12)
-			if ( $original_component ) {
-				// Find all component element and unset 'hasLoop'
-				Database::$global_data['components'] = array_map(
-					function( $component ) use ( $element ) {
-						if ( ! empty( $element['cid'] ) && $element['cid'] === $component['id'] ) {
-							foreach ( $component['elements'] as $index => $component_element ) {
-								if ( isset( $component['elements'][ $index ]['settings']['hasLoop'] ) ) {
-									unset( $component['elements'][ $index ]['settings']['hasLoop'] );
-								}
-							}
-						}
-						return $component;
-					},
-					Database::$global_data['components']
-				);
-			}
+			// Prevent condition execution when looping (@since 1.12.2)
+			unset( $element['settings']['_conditions'] );
 
-			// Prevent endless loop for global element
-			if ( ! empty( $global_element['global'] ) ) {
-				// Find the global element and unset 'hasLoop'
-				Database::$global_data['elements'] = array_map(
-					function( $global_element ) use ( $element ) {
-						if ( ! empty( $element['global'] ) && $element['global'] === $global_element['global'] ) {
-							  unset( $global_element['settings']['hasLoop'] );
-						}
-						return $global_element;
-					},
-					Database::$global_data['elements']
-				);
-			}
+			// Maybe add li node for children elements (@since 2.0)
+			add_filter( 'bricks/frontend/render_element', [ $this, 'maybe_wrap_nav_link' ], 0, 2 );
 
 			// STEP: Render loop
 			$output = $query->render( 'Bricks\Frontend::render_element', compact( 'element' ) );
 
+			// Maybe add li node for children elements (@since 2.0)
+			remove_filter( 'bricks/frontend/render_element', [ $this, 'maybe_wrap_nav_link' ], 0, 2 );
+
+			// NOTE: Undocumented: For builder to collect first query loop node if query located inside component (@since 2.0)
+			$output = apply_filters( 'bricks/frontend/render_loop', $output, $element, $this );
+
 			echo $output;
-
-			// Prevent endless loop for component (@since 1.12)
-			if ( $original_component ) {
-				// Restore orignal component with 'hasLoop' setting after execute render_element
-				Database::$global_data['components'] = array_map(
-					function( $component ) use ( $element, $original_component ) {
-						if ( ! empty( $element['cid'] ) && $element['cid'] === $component['id'] ) {
-							  $component = $original_component;
-						}
-						return $component;
-					},
-					Database::$global_data['components']
-				);
-			}
-
-			// Prevent endless loop for global element
-			if ( ! empty( $global_element['global'] ) ) {
-				// Add back global element 'hasLoop' setting after execute render_element
-				Database::$global_data['elements'] = array_map(
-					function( $global_element ) use ( $element ) {
-						if ( ! empty( $element['global'] ) && $element['global'] === $global_element['global'] ) {
-							  $global_element['settings']['hasLoop'] = true;
-						}
-						return $global_element;
-					},
-					Database::$global_data['elements']
-				);
-			}
 
 			// STEP: Infinite scroll
 			$this->render_query_loop_trail( $query );
@@ -850,17 +830,30 @@ class Element_Container extends Element {
 
 		// No background video set on element ID: Loop over element global classes
 		if ( ! $video_wrapper_html ) {
-			$elements_class_ids = ! empty( $settings['_cssGlobalClasses'] ) ? $settings['_cssGlobalClasses'] : [];
+			/**
+			 * Ensure global classes IDs are an array
+			 *
+			 * If "Multiple options" is not enabled, the selected class is stored as a string.
+			 *
+			 * @since 2.0
+			 */
+			if ( ! empty( $settings['_cssGlobalClasses'] ) ) {
+				$elements_class_ids = $settings['_cssGlobalClasses'];
 
-			if ( count( $elements_class_ids ) ) {
-				$global_classes = Database::$global_data['globalClasses'];
+				if ( is_string( $elements_class_ids ) ) {
+					$elements_class_ids = explode( ' ', $elements_class_ids );
+				}
 
-				foreach ( $global_classes as $global_class ) {
-					$global_class_id = ! empty( $global_class['id'] ) ? $global_class['id'] : '';
+				if ( is_array( $elements_class_ids ) && count( $elements_class_ids ) ) {
+					$global_classes = Database::$global_data['globalClasses'];
 
-					if ( ! $video_wrapper_html && in_array( $global_class_id, $elements_class_ids ) ) {
-						if ( ! empty( $global_class['settings'] ) ) {
-							$video_wrapper_html = $this->get_background_video_html( $global_class['settings'] );
+					foreach ( $global_classes as $global_class ) {
+						$global_class_id = ! empty( $global_class['id'] ) ? $global_class['id'] : '';
+
+						if ( ! $video_wrapper_html && in_array( $global_class_id, $elements_class_ids ) ) {
+							if ( ! empty( $global_class['settings'] ) ) {
+								$video_wrapper_html = $this->get_background_video_html( $global_class['settings'] );
+							}
 						}
 					}
 				}
@@ -921,7 +914,9 @@ class Element_Container extends Element {
 
 		$output .= $video_wrapper_html;
 
-		// Render element children
+		// Maybe add li node for children elements (@since 2.0)
+		add_filter( 'bricks/frontend/render_element', [ $this, 'maybe_wrap_nav_link' ], 0, 2 );
+
 		if ( ! empty( $element['children'] ) && is_array( $element['children'] ) ) {
 			foreach ( $element['children'] as $child_id ) {
 				$child_element = Frontend::$elements[ $child_id ] ?? false;
@@ -935,52 +930,15 @@ class Element_Container extends Element {
 					continue;
 				}
 
+				// Render element children
 				$child_html = $child_element ? Frontend::render_element( $child_element ) : false; // Recursive
 
-				if ( $child_element && $child_html ) {
-					// Nav items is parent element: Wrap this nav link in <li> (@since 1.8)
-					$parent_id               = $child_element['parent'];
-					$parent_element          = ! empty( Frontend::$elements[ $parent_id ] ) ? Frontend::$elements[ $parent_id ] : false;
-					$inside_nav_items        = ! empty( $parent_element['settings']['_hidden']['_cssClasses'] ) ? $parent_element['settings']['_hidden']['_cssClasses'] === 'brx-nav-nested-items' : false;
-					$inside_dropdown_content = ! empty( $parent_element['settings']['_hidden']['_cssClasses'] ) ? $parent_element['settings']['_hidden']['_cssClasses'] === 'brx-dropdown-content' : false;
-
-					// Wrap in <li> if child HTML does not start with an 'li' tag (e.g. non-megamenu dropdown)
-					if (
-						( $inside_nav_items || $inside_dropdown_content ) &&
-						( strpos( $child_html, '<li' ) === false || strpos( $child_html, '<li' ) !== 0 )
-					) {
-						$dropdown_id      = $parent_element['parent'];
-						$dropdown_element = ! empty( Frontend::$elements[ $dropdown_id ] ) ? Frontend::$elements[ $dropdown_id ] : false;
-
-						// Megamenu: Don't wrap dropdown item in <li>
-						if ( isset( $dropdown_element['settings']['megaMenu'] ) ) {
-							$output .= $child_html;
-						}
-
-						// Default: Wrap menu item in <li>
-						else {
-							if ( isset( $child_element['settings']['hasLoop'] ) ) {
-								// Get first HTML tag
-								preg_match( '/<([a-zA-Z]+)([^>]*)>/', $child_html, $matches );
-								$html_tag = $matches[1] ?? 'div';
-
-								// Wrap each loop node in <li>
-								$output .= preg_replace( '/(<' . $html_tag . '.*?>.*?<\/' . $html_tag . '>)/', '<li class="menu-item">$1</li>', $child_html );
-							} else {
-								$output .= '<li class="menu-item">';
-								$output .= $child_html;
-								$output .= '</li>';
-							}
-						}
-					}
-
-					// Default: Render child element HTML
-					else {
-						$output .= $child_html;
-					}
-				}
+				$output .= $child_html;
 			}
 		}
+
+		// Maybe add li node for children elements (@since 2.0)
+		remove_filter( 'bricks/frontend/render_element', [ $this, 'maybe_wrap_nav_link' ], 0, 2 );
 
 		/**
 		 * STEP: Add masonry trail nodes
@@ -995,5 +953,51 @@ class Element_Container extends Element {
 		$output .= "</{$this->tag}>";
 
 		echo $output;
+	}
+
+	/**
+	 * Modify html for element instance
+	 * - Wrap nav link in <li> if inside nav items or dropdown content
+	 * - Priority: 0 to run before other filters that might modify the HTML before this function
+	 *
+	 * @since 2.0
+	 */
+	public function maybe_wrap_nav_link( $html, $element_instance ) {
+		if ( empty( $html ) ) {
+			return $html;
+		}
+
+		// Nav items is parent element: Wrap this nav link in <li> (@since 1.8)
+		$element   = $element_instance->element ?? false;
+		$parent_id = $element['parent'] ?? false;
+
+		if ( ! $parent_id ) {
+			return $html;
+		}
+
+		$parent_element          = ! empty( Frontend::$elements[ $parent_id ] ) ? Frontend::$elements[ $parent_id ] : false;
+		$inside_nav_items        = ! empty( $parent_element['settings']['_hidden']['_cssClasses'] ) ? $parent_element['settings']['_hidden']['_cssClasses'] === 'brx-nav-nested-items' : false;
+		$inside_dropdown_content = ! empty( $parent_element['settings']['_hidden']['_cssClasses'] ) ? $parent_element['settings']['_hidden']['_cssClasses'] === 'brx-dropdown-content' : false;
+
+		// Wrap in <li> if child HTML does not start with an 'li' tag (e.g. non-megamenu dropdown)
+		if (
+			( $inside_nav_items || $inside_dropdown_content ) &&
+			( strpos( $html, '<li' ) === false || strpos( $html, '<li' ) !== 0 )
+		) {
+			$dropdown_id      = $parent_element['parent'] ?? false;
+			$dropdown_element = isset( Frontend::$elements[ $dropdown_id ] ) && ! empty( Frontend::$elements[ $dropdown_id ] ) ? Frontend::$elements[ $dropdown_id ] : false;
+
+			// Megamenu: Don't wrap dropdown item in <li>
+			if ( isset( $dropdown_element['settings']['megaMenu'] ) ) {
+				return $html;
+			}
+
+			// Wrap menu item in <li>
+			else {
+				$html = '<li class="menu-item">' . $html . '</li>';
+			}
+		}
+
+		return $html;
 	}
 }

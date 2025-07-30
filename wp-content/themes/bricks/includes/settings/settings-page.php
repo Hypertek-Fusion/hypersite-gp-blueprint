@@ -76,6 +76,12 @@ class Settings_Page extends Settings_Base {
 			];
 		}
 
+		$this->controls['popupDisabled'] = [
+			'group' => 'general',
+			'type'  => 'checkbox',
+			'label' => esc_html__( 'Disable popups', 'bricks' ),
+		];
+
 		// Add Theme Styles "General" controls to page settings
 		$style_controls = Theme_Styles::$controls;
 
@@ -157,7 +163,7 @@ class Settings_Page extends Settings_Base {
 
 		$this->controls['scrollSnapSelector'] = [
 			'group'       => 'scroll-snap',
-			'label'       => esc_html__( 'Selector', 'bricks' ),
+			'label'       => esc_html__( 'Snapping elements selector', 'bricks' ),
 			'type'        => 'text',
 			'inline'      => true,
 			'dd'          => false,
@@ -190,7 +196,6 @@ class Settings_Page extends Settings_Base {
 			'tooltip' => 'scroll-snap-margin',
 			'type'    => 'number',
 			'units'   => true,
-			'large'   => true,
 			'css'     => [
 				[
 					'selector' => '.brxe-section',
@@ -205,7 +210,6 @@ class Settings_Page extends Settings_Base {
 			'tooltip' => 'scroll-snap-padding',
 			'type'    => 'number',
 			'units'   => true,
-			'large'   => true,
 			'css'     => [
 				[
 					'selector' => 'html',
@@ -322,7 +326,7 @@ class Settings_Page extends Settings_Base {
 			'group'       => 'social-media',
 			'label'       => esc_html__( 'Description', 'bricks' ),
 			'type'        => 'text',
-			'placeholder' => get_the_excerpt(),
+			'placeholder' => bricks_is_builder() ? get_the_excerpt() : '', // Avoid memory exhausted on plugin's hook (#86c48hete; 2.x)
 			'description' => esc_html__( 'Recommended length: 55 characters. Default: Post/page excerpt.', 'bricks' ),
 		];
 

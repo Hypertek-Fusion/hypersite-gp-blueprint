@@ -760,7 +760,7 @@ class Element_Post_Comments extends Element {
 				if ( isset( $settings['label'] ) ) {
 					$comment_field =
 					'<div class="form-group">
-						<label for="comment">' . esc_html__( 'Comment', 'bricks' ) . ' *</label>
+						<label for="comment">' . esc_html__( 'Comment', 'bricks' ) . ' <span class="required">*</span></label>
 						<textarea id="comment" name="comment" cols="45" rows="8" required></textarea>
 					</div>';
 				} else {

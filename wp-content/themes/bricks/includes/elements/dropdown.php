@@ -79,6 +79,11 @@ class Element_Dropdown extends Element {
 			'group' => 'icon',
 			'label' => esc_html__( 'Icon', 'bricks' ),
 			'type'  => 'icon',
+			'css'   => [
+				[
+					'selector' => '.brx-submenu-toggle button > svg',
+				],
+			]
 		];
 
 		$this->controls['iconPadding'] = [
@@ -98,7 +103,6 @@ class Element_Dropdown extends Element {
 			'label' => esc_html__( 'Gap', 'bricks' ),
 			'type'  => 'number',
 			'units' => true,
-			'large' => true,
 			'css'   => [
 				[
 					'property' => 'gap',
@@ -281,7 +285,6 @@ class Element_Dropdown extends Element {
 			'label'    => esc_html__( 'Min. width', 'bricks' ),
 			'type'     => 'number',
 			'units'    => true,
-			'large'    => true,
 			'css'      => [
 				[
 					'property' => 'min-width',
@@ -759,6 +762,9 @@ class Element_Dropdown extends Element {
 			$this->set_attribute( '_root', 'data-mega-menu-vertical', $settings['megaMenuSelectorVertical'] );
 		}
 
+		// Get children HTML which included aria-current="page" attribute
+		$children_html = Frontend::render_children( $this );
+
 		$output = "<{$this->tag} {$this->render_attributes( '_root' )}>";
 
 		$link = ! empty( $settings['link'] ) ? $settings['link'] : false;
@@ -773,7 +779,7 @@ class Element_Dropdown extends Element {
 		}
 
 		// Dropdown toggle (contains text & icon)
-		$output .= is_string( $text ) && strpos( $text, 'aria-current' ) !== false ? '<div class="brx-submenu-toggle aria-current">' : '<div class="brx-submenu-toggle">';
+		$output .= is_string( $text ) && strpos( $text, 'aria-current' ) !== false || ( ! empty( $children_html ) && strpos( $children_html, 'aria-current="page"' ) !== false ) ? '<div class="brx-submenu-toggle aria-current">' : '<div class="brx-submenu-toggle">';
 
 		if ( $text ) {
 			$output .= $text;
@@ -789,7 +795,7 @@ class Element_Dropdown extends Element {
 
 		$output .= '</div>';
 
-		$output .= Frontend::render_children( $this );
+		$output .= $children_html;
 
 		$output .= "</{$this->tag}>";
 

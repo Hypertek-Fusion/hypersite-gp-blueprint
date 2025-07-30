@@ -26,6 +26,9 @@ class Wpml {
 			add_filter( 'bricks/database/bricks_get_all_templates_by_type_args', [ $this, 'wpml_get_posts_args' ] );
 		}
 
+		// @since 1.7.1 - Prefix cache key with get_locale() to ensure correct templates are loaded for different languages (@see #862jdhqgr)
+		add_filter( 'bricks/database/get_all_templates_cache_key', [ $this, 'get_all_templates_cache_key' ] );
+
 		add_filter( 'wpml_page_builder_support_required', [ $this, 'wpml_page_builder_support_required' ], 10, 1 );
 		add_action( 'wpml_page_builder_register_strings', [ $this, 'wpml_page_builder_register_strings' ], 10, 2 );
 		add_action( 'wpml_pro_translation_completed', [ $this, 'handle_translation_completed_no_strings' ], 10, 3 );
@@ -70,8 +73,21 @@ class Wpml {
 
 		// Apply filter to each term name (@since 1.11)
 		add_filter( 'bricks/builder/term_name', [ $this, 'add_language_to_term_name' ], 10, 3 );
-	}
 
+		// Reassign filter element IDs for translated posts (fix DB AJAX) (@since 1.12.2)
+		add_filter( 'bricks/fix_filter_element_db', [ $this, 'fix_filter_element_db' ], 10, 3 );
+
+		// Add language code to filter element data (@since 1.12.2)
+		add_filter( 'bricks/query_filters/element_data', [ $this, 'set_filter_element_language' ], 10, 3 );
+
+		// Switch language for Bricks job execution (@since 1.12.2)
+		add_action( 'bricks_execute_filter_index_job', [ $this, 'bricks_execute_filter_index_job' ], 10 );
+
+		// Enable WPML hooks in Bricks frontend endpoints (@since 1.12.2)
+		add_action( 'bricks/render_query_result/start', [ $this, 'wpml_get_term_adjust_id' ] );
+		add_action( 'bricks/render_query_page/start', [ $this, 'wpml_get_term_adjust_id' ] );
+		add_action( 'bricks/render_popup_content/start', [ $this, 'wpml_get_term_adjust_id' ] );
+	}
 
 	/**
 	 * Handle WPML translation completion ONLY when there are no strings to translate
@@ -114,6 +130,12 @@ class Wpml {
 		foreach ( $meta_keys as $meta_key ) {
 			$meta_value = get_post_meta( $original_post_id, $meta_key, true );
 			if ( $meta_value ) {
+				if ( in_array( $meta_key, [ BRICKS_DB_PAGE_CONTENT, BRICKS_DB_PAGE_HEADER, BRICKS_DB_PAGE_FOOTER ], true ) ) {
+					$filter_elements = \Bricks\Query_Filters::filter_controls_elements();
+
+					// Ensure each Filter element Bricks ID is unique
+					$meta_value = \Bricks\Helpers::generate_new_element_ids( $meta_value, $filter_elements );
+				}
 				update_post_meta( $new_post_id, $meta_key, $meta_value );
 			}
 		}
@@ -611,6 +633,20 @@ class Wpml {
 		// Save the original post data which now contains the translations
 		$meta_key = Database::get_bricks_data_key( $area );
 
+		if ( in_array( $meta_key, [ BRICKS_DB_PAGE_CONTENT, BRICKS_DB_PAGE_HEADER, BRICKS_DB_PAGE_FOOTER ], true ) ) {
+			/**
+			 * To avoid all IDs regenerate for every translation sync (especially query ids), only regenerate the IDs of the filter elements to solve index issues.
+			 * This is not same as Polylang
+			 * Not recommended as not unique element IDs might issue might happen (#862je0kmd)
+			 *
+			 * @since 1.12.2
+			 */
+			$filter_elements = \Bricks\Query_Filters::filter_controls_elements();
+
+			// Ensure each Filter element Bricks ID is unique (@since 1.12.2)
+			$bricks_elements = Helpers::generate_new_element_ids( $bricks_elements, $filter_elements );
+		}
+
 		update_post_meta( $translated_post_id, $meta_key, $bricks_elements );
 
 		// Update template settings if this is a template
@@ -726,8 +762,6 @@ class Wpml {
 	 * @return string The modified title with the language suffix.
 	 */
 	public function add_langugage_to_post_title( $title, $page_id ) {
-		\Bricks\Ajax::verify_nonce( 'bricks-nonce-builder' );
-
 		if ( isset( $_GET['addLanguageToPostTitle'] ) ) {
 			$language_code = self::get_post_language_code( $page_id );
 			$language_code = ! empty( $language_code ) ? strtoupper( $language_code ) : '';
@@ -865,5 +899,101 @@ class Wpml {
 		}
 
 		return $url;
+	}
+
+	/**
+	 * Prefix cache key with get_locale() to ensure correct templates are loaded for different languages
+	 *
+	 * @since 1.7.1
+	 */
+	public function get_all_templates_cache_key( $cache_key ) {
+		return get_locale() . "_$cache_key";
+	}
+
+	/**
+	 * Reassign new IDs for filter elements when fixing the filter element DB
+	 *
+	 * @since 1.12.2
+	 */
+	public function fix_filter_element_db( $handled, $post_id, $template_type ) {
+		$language_code = self::get_post_language_code( $post_id );
+
+		if ( ! $language_code ) {
+			return $handled;
+		}
+
+		$default_language = apply_filters( 'wpml_default_language', null );
+
+		// If default language, skip
+		if ( $language_code === $default_language ) {
+			return $handled;
+		}
+
+		// We need to reassign new IDs for filter elements
+		$filter_elements = \Bricks\Query_Filters::filter_controls_elements();
+
+		// Ensure each Filter element Bricks ID is unique
+		$bricks_elements = Database::get_data( $post_id, $template_type );
+
+		$bricks_elements = \Bricks\Helpers::generate_new_element_ids( $bricks_elements, $filter_elements );
+
+		// Update the post meta with the new elements, will auto update custom element DB and reindex
+		update_post_meta( $post_id, Database::get_bricks_data_key( $template_type ), $bricks_elements );
+
+		// Return true to indicate the filter element DB has been handled
+		return true;
+	}
+
+	/**
+	 * Insert language code into the element settings
+	 *
+	 * @since 1.12.2
+	 */
+	public function set_filter_element_language( $data, $element, $post_id ) {
+		// Get the language code of the post
+		$language_code = self::get_post_language_code( $post_id );
+
+		if ( empty( $language_code ) ) {
+			return $data;
+		}
+
+		// Insert the language code into the element settings
+		$data['language'] = $language_code;
+
+		return $data;
+	}
+
+	/**
+	 * Switch language based on query filter index job
+	 * Otherwise, the values of the index records is following the current language set by WPML plugin
+	 *
+	 * @since 1.12.2
+	 */
+	public function bricks_execute_filter_index_job( $job ) {
+		$language_code = $job['language'] ?? false;
+
+		if ( ! empty( $language_code ) ) {
+			do_action( 'wpml_switch_language', $language_code );
+		}
+	}
+
+	/**
+	 * Run WPML hooks to auto-adjust term IDs in Bricks frontend endpoints
+	 *
+	 * Adjust queried categories and tags ids according to the language
+	 *
+	 * @since 1.12.2
+	 */
+	public function wpml_get_term_adjust_id( $request_data ) {
+		global $sitepress;
+
+		if ( ! $sitepress || ! method_exists( $sitepress, 'get_setting' ) ) {
+			return;
+		}
+
+		// @see sitepress.class.php set_term_filters_and_hooks()
+		if ( $sitepress->get_setting( 'auto_adjust_ids' ) ) {
+			add_filter( 'get_term', [ $sitepress, 'get_term_adjust_id' ], 1, 1 );
+		}
 	}
 }

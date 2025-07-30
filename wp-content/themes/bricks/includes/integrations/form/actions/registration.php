@@ -20,6 +20,7 @@ class Registration extends Base {
 		$user_pass            = isset( $form_settings['registrationPassword'] ) && isset( $form_fields[ "form-field-{$form_settings['registrationPassword']}" ] ) ? $form_fields[ "form-field-{$form_settings['registrationPassword']}" ] : false;
 		$user_pass_min_length = isset( $form_settings['registrationPasswordMinLength'] ) ? intval( $form_settings['registrationPasswordMinLength'] ) : false;
 		$user_role            = isset( $form_settings['registrationRole'] ) ? $form_settings['registrationRole'] : get_option( 'default_role' );
+		$wp_notification      = isset( $form_settings['registrationWPNotification'] ) && $form_settings['registrationWPNotification']; // (@since 1.12.2)
 
 		// Unset if $user_role is 'administrator' or 'super_admin' (for security reasons)
 		if ( in_array( $user_role, [ 'administrator', 'super_admin' ], true ) ) {
@@ -30,6 +31,9 @@ class Registration extends Base {
 		if ( ! $user_login && is_email( $user_email ) ) {
 			// Use part before @ as user_login
 			$user_login = explode( '@', $user_email )[0];
+
+			// Sanitize the username to remove invalid characters (@since 2.0)
+			$user_login = sanitize_user( $user_login, true );
 
 			// user_login taken: Append number to user_login
 			if ( username_exists( $user_login ) ) {
@@ -90,7 +94,14 @@ class Registration extends Base {
 			return;
 		}
 
-		// Success
+		/**
+		 * Success, trigger 'register_new_user' action hook (so notifications can be sent)
+		 *
+		 * @since 1.12.2
+		 */
+		if ( $wp_notification ) {
+			do_action( 'register_new_user', $user_id );
+		}
 
 		// Auto log in user
 		if ( isset( $form_settings['registrationAutoLogin'] ) ) {

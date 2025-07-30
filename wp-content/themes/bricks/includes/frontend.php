@@ -214,9 +214,9 @@ class Frontend {
 		}
 
 		// STEP: Render tags
-		$open_graph_meta_tags = [ '<!-- Facebook Open Graph (by Bricks) -->' ];
+		$open_graph_meta_tags = [];
 
-		$facebook_app_id = isset( Database::$global_settings['facebookAppId'] ) && ! empty( Database::$global_settings['facebookAppId'] ) ? Database::$global_settings['facebookAppId'] : false;
+		$facebook_app_id = Database::$global_settings['facebookAppId'] ?? false;
 
 		if ( $facebook_app_id ) {
 			$open_graph_meta_tags[] = '<meta property="fb:app_id" content="' . $facebook_app_id . '" />';
@@ -340,7 +340,7 @@ class Frontend {
 	 * Enqueue styles and scripts
 	 */
 	public function enqueue_scripts() {
-		if ( is_admin_bar_showing() && Capabilities::current_user_has_full_access() ) {
+		if ( is_admin_bar_showing() && current_user_can( 'manage_options' ) ) {
 			// Load admin.min.css to add styles to the quick edit links
 			wp_enqueue_style( 'bricks-admin', BRICKS_URL_ASSETS . 'css/admin.min.css', [], filemtime( BRICKS_PATH_ASSETS . 'css/admin.min.css' ) );
 		}
@@ -392,46 +392,45 @@ class Frontend {
 			'bricks-scripts',
 			'bricksData',
 			[
-				'debug'                   => isset( $_GET['debug'] ),
-				'locale'                  => get_locale(),
-				'ajaxUrl'                 => admin_url( 'admin-ajax.php' ),
-				'restApiUrl'              => Api::get_rest_api_url(),
-				'nonce'                   => wp_create_nonce( 'bricks-nonce' ),
-				'formNonce'               => wp_create_nonce( 'bricks-nonce-form' ),
-				'wpRestNonce'             => wp_create_nonce( 'wp_rest' ),
-				'postId'                  => Database::$page_data['preview_or_post_id'] ?? get_the_ID(),
-				'recaptchaIds'            => [],
-				'animatedTypingInstances' => [], // To destroy and then re-init TypedJS instances
-				'videoInstances'          => [], // To destroy and then re-init Plyr instances
-				'splideInstances'         => [], // Necessary to destroy and then reinit SplideJS instances
-				'tocbotInstances'         => [], // Necessary to destroy and then reinit Tocbot instances
-				'swiperInstances'         => [], // To destroy and then re-init SwiperJS instances
-				'queryLoopInstances'      => [], // To hold the query data for infinite scroll + load more
-				'interactions'            => [], // Holds all the interactions
-				'filterInstances'         => [], // Holds all the filter instances (@since 1.9.6)
-				'isotopeInstances'        => [], // Holds all the isotope instances (@since 1.9.6)
-				'mapStyles'               => Setup::get_map_styles(),
-				'facebookAppId'           => isset( Database::$global_settings['facebookAppId'] ) ? Database::$global_settings['facebookAppId'] : false,
-				'headerPosition'          => Database::$header_position,
-				'offsetLazyLoad'          => ! empty( Database::$global_settings['offsetLazyLoad'] ) ? Database::$global_settings['offsetLazyLoad'] : 300,
-				'baseUrl'                 => $base_url, // @since 1.9.6
-				'useQueryFilter'          => Helpers::enabled_query_filters(), // @since 1.9.6
-				'pageFilters'             => Query_Filters::$page_filters, // @since 1.9.6
-				'facebookAppId'           => Database::$global_settings['facebookAppId'] ?? false,
-				'offsetLazyLoad'          => Database::$global_settings['offsetLazyLoad'] ?? 300,
-				'headerPosition'          => Database::$header_position,
-				'language'                => $current_language,
-				'wpmlUrlFormat'           => $wpml_url_format ?? '',
-				'multilangPlugin'         => $multilang_plugin,
-				'i18n'                    => [
-					'openAccordion'   => esc_html__( 'Open accordion', 'bricks' ),
-					'openMobileMenu'  => esc_html__( 'Open mobile menu', 'bricks' ),
-					'closeMobileMenu' => esc_html__( 'Close mobile menu', 'bricks' ),
-					'showPassword'    => esc_html__( 'Show password', 'bricks' ),
-					'hidePassword'    => esc_html__( 'Hide password', 'bricks' ),
-				],
-				'selectedFilters'         => Query_Filters::$selected_filters, // @since 1.11
-				'filterNiceNames'         => [], // @since 1.11
+				'debug'                       => isset( $_GET['debug'] ),
+				'locale'                      => get_locale(),
+				'ajaxUrl'                     => admin_url( 'admin-ajax.php' ),
+				'restApiUrl'                  => Api::get_rest_api_url(),
+				'nonce'                       => wp_create_nonce( 'bricks-nonce' ),
+				'formNonce'                   => wp_create_nonce( 'bricks-nonce-form' ),
+				'wpRestNonce'                 => wp_create_nonce( 'wp_rest' ),
+				'postId'                      => Database::$page_data['preview_or_post_id'] ?? get_the_ID(),
+				'recaptchaIds'                => [],
+				'animatedTypingInstances'     => [], // To destroy and then re-init TypedJS instances
+				'videoInstances'              => [], // To destroy and then re-init Plyr instances
+				'splideInstances'             => [], // Necessary to destroy and then reinit SplideJS instances
+				'tocbotInstances'             => [], // Necessary to destroy and then reinit Tocbot instances
+				'swiperInstances'             => [], // To destroy and then re-init SwiperJS instances
+				'queryLoopInstances'          => [], // To hold the query data for infinite scroll + load more
+				'interactions'                => [], // Holds all the interactions
+				'filterInstances'             => [], // Holds all the filter instances (@since 1.9.6)
+				'isotopeInstances'            => [], // Holds all the isotope instances (@since 1.9.6)
+				'activeFiltersCountInstances' => [], // Holds all the active filters count instances (@since 2.0)
+				'googleMapInstances'          => [], // Holds all the Google Map instances (@since 2.0)
+				'facebookAppId'               => isset( Database::$global_settings['facebookAppId'] ) ? Database::$global_settings['facebookAppId'] : false,
+				'headerPosition'              => Database::$header_position,
+				'offsetLazyLoad'              => ! empty( Database::$global_settings['offsetLazyLoad'] ) ? Database::$global_settings['offsetLazyLoad'] : 300,
+				'baseUrl'                     => $base_url, // @since 1.9.6
+				'useQueryFilter'              => Helpers::enabled_query_filters(), // @since 1.9.6
+				'pageFilters'                 => Query_Filters::$page_filters, // @since 1.9.6
+				'facebookAppId'               => Database::$global_settings['facebookAppId'] ?? false,
+				'offsetLazyLoad'              => Database::$global_settings['offsetLazyLoad'] ?? 300,
+				'headerPosition'              => Database::$header_position,
+				'language'                    => $current_language,
+				'wpmlUrlFormat'               => $wpml_url_format ?? '',
+				'multilangPlugin'             => $multilang_plugin,
+				'i18n'                        => I18n::get_frontend_i18n(),
+				'selectedFilters'             => Query_Filters::$selected_filters, // @since 1.11
+				'filterNiceNames'             => [], // @since 1.11
+				'bricksGoogleMarkerScript'    => BRICKS_URL_ASSETS . 'js/libs/bricks-google-marker.min.js?v=' . BRICKS_VERSION, // @since 2.0
+				'infoboxScript'               => BRICKS_URL_ASSETS . 'js/libs/infobox.min.js?v=' . BRICKS_VERSION, // @since 2.0
+				'markerClustererScript'       => BRICKS_URL_ASSETS . 'js/libs/markerclusterer.min.js?v=' . BRICKS_VERSION, // @since 2.0
+				'mainQueryId'                 => Database::$main_query_id, // @since 2.0
 			]
 		);
 	}
@@ -442,7 +441,7 @@ class Frontend {
 	 * @since 1.8.2 using wp_footer instead of wp_enqueue_scripts to get all dynamic data styles & global classes
 	 */
 	public function enqueue_inline_css() {
-		// Dummy style to load after woocommerce.min.css
+		// Dummy style to load after woocommerce.min.css or woocommerce-layer.min.css
 		wp_register_style( 'bricks-frontend-inline', false ); // phpcs:ignore WordPress.WP.EnqueuedResourceParameters.MissingVersion
 		wp_enqueue_style( 'bricks-frontend-inline' );
 
@@ -614,11 +613,23 @@ class Frontend {
 			$element['settings'] = $global_settings;
 		}
 
+		// Prevent endless loop (@since 2.0; #86c3qwrm6)
+		if ( isset( $element['settings']['hasLoop'] ) && $element['settings']['hasLoop'] && isset( $element['looped'] ) && $element['looped'] ) {
+			// This element already looped, the current 'hasLoop' might be coming from component properties
+			unset( $element['settings']['hasLoop'] );
+		}
+
 		// Init element class (e.g.: new Bricks\Element_Alert( $element ))
 		$element_class_name = Elements::$elements[ $element_name ]['class'] ?? $element_name;
 
 		if ( class_exists( $element_class_name ) ) {
-			$element['themeStyleSettings'] = Theme_Styles::$active_settings;
+			// Assign most-specific theme settings to element
+			$theme_style_ids = array_keys( Theme_Styles::$settings_by_id );
+			$theme_style_id  = end( $theme_style_ids );
+
+			if ( $theme_style_id ) {
+				$element['themeStyleSettings'] = Theme_Styles::$settings_by_id[ $theme_style_id ];
+			}
 
 			$element_instance = new $element_class_name( $element );
 			$element_instance->load();
@@ -626,12 +637,22 @@ class Frontend {
 			// Enqueue element styles/scripts & render element
 			ob_start();
 			$element_instance->init();
-			return ob_get_clean();
+			$element_html = ob_get_clean();
+
+			// @see https://academy.bricksbuilder.io/article/filter-bricks-frontend-render_element/ (@since 2.0)
+			return apply_filters( 'bricks/frontend/render_element', $element_html, $element_instance );
 		}
 
 		// Element doesn't exist: Show message to user with builder access
 		if ( Capabilities::current_user_can_use_builder() ) {
-			return sprintf( '<div class="bricks-element-placeholder no-php-class">%s: ' . $element_class_name . '</div>', esc_html__( 'PHP class does not exist', 'bricks' ) );
+			$no_element_text = esc_html__( 'PHP class does not exist', 'bricks' );
+
+			// Check: Element is disabled via element manager (@since 2.0)
+			if ( isset( Elements::$manager[ $element_class_name ]['status'] ) && Elements::$manager[ $element_class_name ]['status'] === 'disabled' ) {
+				$no_element_text = esc_html__( 'Element has been disabled globally.', 'bricks' ) . ' (<a href="' . admin_url( 'admin.php?page=bricks-elements' ) . '" target="_blank">Bricks > ' . esc_html__( 'Elements', 'bricks' ) . '</a>)';
+			}
+
+			return sprintf( '<div class="bricks-element-placeholder no-php-class">' . $element_class_name . ': %s</div>', $no_element_text );
 		}
 	}
 
@@ -649,23 +670,6 @@ class Frontend {
 
 		// Get componentInstance (builder) OR from database (frontend)
 		$component_instance = $element['componentInstance'] ?? Helpers::get_component_instance( $element );
-
-		/**
-		 * BUILDER: Replace children placeholder node with Vue components (in BricksElementPHP.vue)
-		 *
-		 * If not static builder area && not frontend && not a loop ghost node (loop index: 1, 2, 3, etc.)
-		 *
-		 * @since 1.7.1
-		 * @since 1.12: Not a component instance
-		 */
-		if (
-			! isset( $element['staticArea'] ) &&
-			! $element_instance->is_frontend &&
-			! Query::get_loop_index()
-			// && ! $component_instance // NOTE: Not in use as it prevents rendering nested elements (e.g. Tabs) on canvas
-		) {
-			return '<div class="brx-nestable-children-placeholder"></div>';
-		}
 
 		// FRONTEND: Return children HTML
 		$children = ! empty( $element['children'] ) && is_array( $element['children'] ) ? $element['children'] : [];
@@ -699,6 +703,17 @@ class Frontend {
 
 				$output .= self::render_element( $child ); // Recursive
 			}
+		}
+
+		/**
+		 * BUILDER: Replace children placeholder node with Vue components (in BricksElementPHP.vue)
+		 *
+		 * If not static builder area && not frontend && not a loop ghost node (loop index: 1, 2, 3, etc.)
+		 *
+		 * @since 1.7.1
+		 */
+		if ( ! isset( $element['staticArea'] ) && ! $element_instance->is_frontend && ! Query::get_loop_index() ) {
+			return '<div class="brx-nestable-children-placeholder"></div>';
 		}
 
 		return $output;
@@ -816,6 +831,11 @@ class Frontend {
 			return $attr;
 		}
 
+		// Return: WC api endpoint might use image for email content (@since 2.0)
+		if ( WooCommerce::is_woocommerce_active() && WooCommerce::is_wc_api_endpoint() ) {
+			return $attr;
+		}
+
 		// Disable lazy load inside TranslatePress iframe (@since 1.6)
 		if ( function_exists( 'trp_is_translation_editor' ) && trp_is_translation_editor( 'preview' ) ) {
 			return $attr;
@@ -902,7 +922,7 @@ class Frontend {
 		?>
 		<a class="skip-link" href="#brx-content"><?php esc_html_e( 'Skip to main content', 'bricks' ); ?></a>
 
-		<?php if ( ! empty( $template_footer_id ) ) { ?>
+		<?php if ( ! empty( $template_footer_id ) && ! Database::is_template_disabled( 'footer' ) ) { ?>
 			<a class="skip-link" href="#brx-footer"><?php esc_html_e( 'Skip to footer', 'bricks' ); ?></a>
 			<?php
 		}

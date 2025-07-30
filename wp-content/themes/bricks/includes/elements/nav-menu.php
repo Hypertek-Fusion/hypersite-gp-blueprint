@@ -874,7 +874,6 @@ class Element_Nav_Menu extends Element {
 			'label' => esc_html__( 'Top', 'bricks' ),
 			'type'  => 'number',
 			'units' => true,
-			'large' => true,
 			'css'   => [
 				[
 					'selector' => '.bricks-mobile-menu-wrapper',
@@ -888,7 +887,6 @@ class Element_Nav_Menu extends Element {
 			'label'       => esc_html__( 'Width', 'bricks' ),
 			'type'        => 'number',
 			'units'       => true,
-			'large'       => true,
 			'css'         => [
 				[
 					'property' => 'width',
@@ -903,7 +901,6 @@ class Element_Nav_Menu extends Element {
 			'label' => esc_html__( 'Height', 'bricks' ),
 			'type'  => 'number',
 			'units' => true,
-			'large' => true,
 			'css'   => [
 				[
 					'property' => 'height',
@@ -1381,6 +1378,14 @@ class Element_Nav_Menu extends Element {
 			'label' => esc_html__( 'Hamburger toggle', 'bricks' ),
 		];
 
+		$this->controls['mobileMenuToggleAriaLabel'] = [
+			'group'       => 'mobile-menu',
+			'label'       => 'aria-label',
+			'type'        => 'text',
+			'inline'      => true,
+			'placeholder' => esc_html__( 'Open mobile menu', 'bricks' ),
+		];
+
 		$this->controls['mobileMenuToggleWidth'] = [
 			'group' => 'mobile-menu',
 			'type'  => 'number',
@@ -1746,8 +1751,9 @@ class Element_Nav_Menu extends Element {
 		) {
 			$menu_html = $this->render_menu_items_of_parent_id( 0 );
 
-			// Builder render (BricksElementPHP.vue) requires one single rootNode
-			if ( bricks_is_builder_call() && $builder_is_inside_dropdown ) {
+			// Builder render (BricksElementPHP.vue) requires one single rootNod
+			// Exclude static area rendering or the HTML will be corrupted after function wrap_loop_nav_link in container.php (@since 2.0)
+			if ( bricks_is_builder_call() && $builder_is_inside_dropdown && ! isset( $_POST['staticArea'] ) ) {
 				echo '<div class="brx-render-child-nodes">';
 				echo $menu_html;
 				echo '</div>';
@@ -1865,8 +1871,11 @@ class Element_Nav_Menu extends Element {
 		}
 
 		if ( $show_menu_toggle_at !== 'never' ) {
+			$mobile_menu_aria_label = ! empty( $settings['mobileMenuToggleAriaLabel'] )
+			? esc_attr__( $settings['mobileMenuToggleAriaLabel'], 'bricks' )
+			: esc_attr__( 'Open mobile menu', 'bricks' );
 			?>
-			<button class="<?php echo join( ' ', $mobile_menu_toggle_classes ); ?>" aria-haspopup="true" aria-label="<?php esc_attr_e( 'Open mobile menu', 'bricks' ); ?>" aria-expanded="false">
+			<button class="<?php echo join( ' ', $mobile_menu_toggle_classes ); ?>" aria-haspopup="true" aria-label="<?php echo $mobile_menu_aria_label; ?>" aria-expanded="false">
 				<span class="bar-top"></span>
 				<span class="bar-center"></span>
 				<span class="bar-bottom"></span>

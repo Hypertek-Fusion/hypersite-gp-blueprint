@@ -42,6 +42,7 @@ class Element_Slider extends Element {
 
 		$this->controls['items'] = [
 			'tab'         => 'content',
+			'label'       => esc_html__( 'Slides', 'bricks' ),
 			'placeholder' => esc_html__( 'Slide', 'bricks' ),
 			'type'        => 'repeater',
 			'checkLoop'   => true,

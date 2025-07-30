@@ -107,7 +107,7 @@ class Product_Rating extends Element {
 				'hide_reviews_link' => $hide_reviews_link,
 			];
 
-			$rating_html = Woocommerce_Helpers::render_product_rating( $product, $params );
+			$rating_html = Woocommerce_Helpers::render_product_rating( $product, $params, false );
 		}
 
 		// No ratings txt

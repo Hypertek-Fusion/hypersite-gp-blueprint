@@ -17,7 +17,12 @@ class Element_Video extends Element {
 
 	public function enqueue_scripts() {
 		if ( isset( $this->theme_styles['customPlayer'] ) ) {
-			wp_enqueue_style( 'video-plyr', BRICKS_URL_ASSETS . 'css/libs/plyr.min.css', [], '3.7.8' );
+			if ( ! Database::get_setting( 'disableBricksCascadeLayer' ) ) { // @since 2.0
+				wp_enqueue_style( 'video-plyr', BRICKS_URL_ASSETS . 'css/libs/plyr-layer.min.css', [], '3.7.8' );
+			} else {
+				wp_enqueue_style( 'video-plyr', BRICKS_URL_ASSETS . 'css/libs/plyr.min.css', [], '3.7.8' );
+			}
+
 			wp_enqueue_script( 'video-plyr', BRICKS_URL_ASSETS . 'js/libs/plyr.min.js', [ 'bricks-scripts' ], '3.7.8', true );
 		}
 	}
@@ -61,9 +66,9 @@ class Element_Video extends Element {
 
 		$this->controls['youTubeId'] = [
 			'tab'      => 'content',
-			'label'    => esc_html__( 'YouTube video ID', 'bricks' ),
+			'label'    => esc_html__( 'YouTube video ID/URL', 'bricks' ),
 			'type'     => 'text',
-			'inline'   => true,
+			'inline'   => false,
 			'required' => [ 'videoType', '=', 'youtube' ],
 			'default'  => '5DGo0AYOJ7s',
 		];
@@ -102,14 +107,6 @@ class Element_Video extends Element {
 			'required' => [ 'videoType', '=', 'youtube' ],
 		];
 
-		$this->controls['youtubeShowinfo'] = [
-			'tab'      => 'content',
-			'label'    => esc_html__( 'Show info', 'bricks' ),
-			'type'     => 'checkbox',
-			'default'  => true,
-			'required' => [ 'videoType', '=', 'youtube' ],
-		];
-
 		$this->controls['youtubeRel'] = [
 			'tab'      => 'content',
 			'label'    => esc_html__( 'Related videos from other channels', 'bricks' ),
@@ -130,9 +127,9 @@ class Element_Video extends Element {
 
 		$this->controls['vimeoId'] = [
 			'tab'      => 'content',
-			'label'    => esc_html__( 'Vimeo video ID', 'bricks' ),
+			'label'    => esc_html__( 'Vimeo video ID/URL', 'bricks' ),
 			'type'     => 'text',
-			'inline'   => true,
+			'inline'   => false,
 			'required' => [ 'videoType', '=', 'vimeo' ],
 		];
 
@@ -420,7 +417,7 @@ class Element_Video extends Element {
 			'tab'         => 'content',
 			'label'       => esc_html__( 'Poster', 'bricks' ),
 			'type'        => 'image',
-			'description' => esc_html__( 'Set for video SEO best practices.', 'bricks' ),
+			'description' => esc_html__( 'Set for video SEO best practices via poster attribute on the video tag. If the source is Youtube or Vimeo, it will be used as preview image.', 'bricks' ),
 			'required'    => [ 'videoType', '=', [ 'media', 'file', 'meta' ] ],
 		];
 
@@ -639,10 +636,6 @@ class Element_Video extends Element {
 
 				if ( isset( $settings['youtubeMute'] ) ) {
 					$video_parameters[] = 'mute=1';
-				}
-
-				if ( ! isset( $settings['youtubeShowinfo'] ) ) {
-					$video_parameters[] = 'showinfo=0';
 				}
 
 				if ( ! isset( $settings['youtubeRel'] ) ) {
@@ -895,6 +888,18 @@ class Element_Video extends Element {
 
 			// STEP: Render YouTube/Vimeo iframe or div with background image
 			$preview_image_url = $this->get_preview_image_url( $settings );
+
+			// STEP: Maybe user use Dynamic Data + Video Poster field for YouTube/Vimeo (@since 1.12.2)
+			if ( empty( $preview_image_url ) && isset( $settings['videoPoster'] ) ) {
+				// Try to get video poster image
+				$video_poster_image = $this->get_video_image_by_key( 'videoPoster' );
+
+				// If there is a video poster image, use it as preview image
+				if ( ! empty( $video_poster_image['url'] ) ) {
+					$preview_image_url = $video_poster_image['url'];
+				}
+			}
+
 			if ( $preview_image_url ) {
 				// STEP: Render div with background image when video lazy load is enabled and autoplay is disabled
 				$this->set_attribute( 'iframe', 'data-iframe-src', $video_url );
@@ -1160,6 +1165,9 @@ class Element_Video extends Element {
 
 			if ( ! empty( $settings['youTubeId'] ) ) {
 				$settings['youTubeId'] = $this->render_dynamic_data( $settings['youTubeId'] );
+
+				// Get YouTube video ID, if it's a full URL (@since 1.12.2)
+				$settings['youTubeId'] = $this->get_youtube_id_from_url( $settings['youTubeId'] );
 			}
 
 			if ( ! empty( $settings['iframeTitle'] ) ) {
@@ -1173,6 +1181,10 @@ class Element_Video extends Element {
 
 			if ( ! empty( $settings['vimeoId'] ) ) {
 				$settings['vimeoId'] = $this->render_dynamic_data( $settings['vimeoId'] );
+
+				// Get Vimeo ID, if it's a full URL (@since 1.12.2)
+				$settings['vimeoId'] = $this->get_vimeo_id_from_url( $settings['vimeoId'] );
+
 			}
 
 			if ( ! empty( $settings['iframeTitle'] ) ) {
@@ -1201,7 +1213,35 @@ class Element_Video extends Element {
 			return $settings;
 		}
 
-		$meta_video_url = $this->render_dynamic_data_tag( $dynamic_data, 'link' );
+		$meta_video_url = '';
+
+		// Set context to 'media' (@since 2.0)
+		$meta_media_value = $this->render_dynamic_data_tag( $dynamic_data, 'media' );
+
+		/**
+		 * Ensure we have a non-empty array and the first element is an array
+		 *
+		 * Check includes/integrations/dynamic-data/providers/base.php
+		 *
+		 * @since 2.0
+		 */
+		if ( is_array( $meta_media_value ) && ! empty( $meta_media_value[0] ) && is_array( $meta_media_value[0] ) ) {
+			$url_or_id = $meta_media_value[0]['url'] ?? '';
+
+			if ( ! empty( $url_or_id ) ) {
+				if ( is_numeric( $url_or_id ) ) {
+					// Cast to int safely and get the attachment URL
+					$attachment_url = wp_get_attachment_url( (int) $url_or_id );
+					if ( $attachment_url ) {
+						// Force URL as string as we will be using preg_match, unknown plugin might change the type via wp_get_attachment_url
+						$meta_video_url = (string) $attachment_url;
+					}
+				} else {
+					// Force URL as string as we will be using preg_match
+					$meta_video_url = (string) $url_or_id;
+				}
+			}
+		}
 
 		if ( empty( $meta_video_url ) ) {
 			return $settings;
@@ -1396,5 +1436,42 @@ class Element_Video extends Element {
 		}
 
 		return $image;
+	}
+
+	/**
+	 * Get the YouTube video ID from a URL
+	 *
+	 * @param string $url
+	 * @return string $video_id
+	 *
+	 * @since 1.12.2
+	 */
+	public function get_youtube_id_from_url( $url = '' ) {
+		// If it's valid URL, extract the video ID
+		if ( filter_var( $url, FILTER_VALIDATE_URL ) && preg_match( '%(?:youtube(?:-nocookie)?\.com/(?:[^/]+/.+/|(?:v|e(?:mbed)?)/|shorts/|live/|.*[?&]v=)|youtu\.be/)([^"&?/ ]{11})%i', $url, $matches ) ) {
+			// Regex from @see: https://gist.github.com/ghalusa/6c7f3a00fd2383e5ef33
+			// @since 2.0: Support for YouTube Shorts and Live URLs
+			return $matches[1];
+		}
+
+		return $url;
+	}
+
+	/**
+	 * Get the Vimeo video ID from a URL
+	 *
+	 * @param string $url
+	 * @return string $video_id
+	 *
+	 * @since 1.12.2
+	 */
+	public function get_vimeo_id_from_url( $url = '' ) {
+		// If it's valid URL, extract the video ID
+		if ( filter_var( $url, FILTER_VALIDATE_URL ) && preg_match( '%^https?:\/\/(?:www\.|player\.)?vimeo.com\/(?:channels\/(?:\w+\/)?|groups\/([^\/]*)\/videos\/|album\/(\d+)\/video\/|video\/|)(\d+)(?:$|\/|\?)(?:[?]?.*)$%im', $url, $matches ) ) {
+			// Regex from @see: https://gist.github.com/anjan011/1fcecdc236594e6d700f
+			return $matches[3];
+		}
+
+		return $url;
 	}
 }

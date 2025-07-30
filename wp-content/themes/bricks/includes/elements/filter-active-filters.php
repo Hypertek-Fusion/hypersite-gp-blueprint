@@ -371,31 +371,41 @@ class Filter_Active_Filters extends Filter_Element {
 		$instance_name = $filter_info['instance_name'];
 		$url_param     = $filter_info['url_param'];
 		$filter_action = $settings['filterAction'] ?? 'filter';
+		$label         = '';
+		$title         = '';
 
 		if ( $filter_action === 'filter' ) {
 			// Handle range filter - Use labelMin and labelMax
 			if ( in_array( $instance_name, [ 'filter-range' ] ) ) {
-				$min_label = $settings['labelMin'] ?? '';
-				$max_label = $settings['labelMax'] ?? '';
-				$mode      = $settings['displayMode'] ?? 'range';
-				$separator = $settings['labelThousandSeparator'] ?? false;
-				$sep_label = $settings['labelSeparatorText'] ?? ',';
-				$use_sep   = $mode === 'range' && $separator; // Only use separator if mode is range
+				$min_label       = $settings['labelMin'] ?? '';
+				$max_label       = $settings['labelMax'] ?? '';
+				$label_direction = $settings['labelDirection'] ?? false; // @since 1.12.2
 
 				if ( is_array( $value ) ) {
-					$min_label_value = $use_sep ? number_format( $value[0], 0, '.', $sep_label ) : $value[0];
-					$max_label_value = $use_sep ? number_format( $value[1], 0, '.', $sep_label ) : $value[1];
-					$label           = "{$min_label} {$min_label_value} - {$max_label} {$max_label_value}";
-					$value           = $value[0]; // Change the value to min value only - no array value
+					$min_label_value = self::get_range_formatted_value( $value[0], $settings );
+					$max_label_value = self::get_range_formatted_value( $value[1], $settings );
+
+					// Set label direction based on the filter setting (@since 1.12.2)
+					if ( $label_direction === 'row-reverse' ) {
+						$label = "{$min_label_value} {$min_label} - {$max_label_value} {$max_label}";
+					} else {
+						$label = "{$min_label} {$min_label_value} - {$max_label} {$max_label_value}";
+					}
+
+					$value = $value[0]; // Change the value to min value only - no array value
 				} else {
 					// Thousand separator
-					$label_value = $use_sep ? number_format( $value, 0, '.', $sep_label ) : $value;
-					$label       = "{$min_label} {$label_value}";
+					$label_value = self::get_range_formatted_value( $value, $settings );
+
+					// Set label direction based on the filter setting (@since 1.12.2)
+					$label = $label_direction === 'row-reverse' ? "{$label_value} {$min_label}" : "{$min_label} {$label_value}";
 				}
 			}
 
 			// Handle datepicker filter
 			elseif ( in_array( $instance_name, [ 'filter-datepicker' ] ) ) {
+				// Set default label, cannot retrieve from db, must be escaped as it's user input (@since 2.0)
+				$label       = esc_attr( $value );
 				$placeholder = ! empty( $settings['placeholder'] ) ? $this->render_dynamic_data( $settings['placeholder'] ) : '';
 				if ( ! empty( $placeholder ) ) {
 					$label = "{$placeholder} {$value}";
@@ -409,8 +419,8 @@ class Filter_Active_Filters extends Filter_Element {
 				$data_matched_value = array_filter(
 					$choices,
 					function( $choice ) use ( $value ) {
-						// DB value must use urldecode first when comparing with user input value (@since 1.12)
-						return self::is_option_value_matched( esc_attr( urldecode( $choice['filter_value'] ) ), esc_attr( $value ) );
+						// DB value must use rawurldecode first when comparing with user input value (@since 1.12)
+						return self::is_option_value_matched( esc_attr( rawurldecode( $choice['filter_value'] ) ), esc_attr( $value ) );
 					}
 				);
 
@@ -430,6 +440,7 @@ class Filter_Active_Filters extends Filter_Element {
 
 						case 'wpField':
 						case 'customField':
+						case 'wcField':
 							$label_mapping        = $settings['labelMapping'] ?? 'value';
 							$custom_label_mapping = $settings['customLabelMapping'] ?? [];
 
@@ -453,8 +464,9 @@ class Filter_Active_Filters extends Filter_Element {
 				}
 			}
 		}
+
 		// Sort
-		else {
+		elseif ( $filter_action === 'sort' ) {
 			// Only filter-select and filter-radio has sort options
 			if ( ! in_array( $instance_name, [ 'filter-select', 'filter-radio' ], true ) ) {
 				return false;
@@ -469,9 +481,23 @@ class Filter_Active_Filters extends Filter_Element {
 			}
 		}
 
-		// Add active filter prefix, suffix or title attribute
-		$title = '';
+		// Per page
+		else {
+			// Only filter-select and filter-radio has sort options
+			if ( ! in_array( $instance_name, [ 'filter-select', 'filter-radio' ], true ) ) {
+				return false;
+			}
 
+			// No per page options, the value is not matched with any per page options
+			if ( empty( $filter_info['per_page_options'] ) || ! in_array( $value, $filter_info['per_page_options'] ) ) {
+				return false;
+			}
+
+			$label = (int) $value;
+			$value = (int) $value;
+		}
+
+		// Add active filter prefix, suffix or title attribute
 		if ( isset( $settings['filterActivePrefix'] ) ) {
 			$label = esc_attr( $this->render_dynamic_data( $settings['filterActivePrefix'] ) ) . $label;
 		}

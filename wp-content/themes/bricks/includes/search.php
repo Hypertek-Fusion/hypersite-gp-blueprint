@@ -26,7 +26,7 @@ class Search {
 
 		/**
 		 * @since 1.10: Bricks: Infinite scroll & Query filter search results
-		 * @since 1.11: 'brx_is_search' is set if there is a filter-search query applied (@see QueryFilters->add_active_filters_query_vars())
+		 * @since 1.11: 'brx_is_search' is set if there is a filter-search query applied (@see QueryFilters->build_search_query_vars())
 		 */
 		$is_bricks_search = Api::is_current_endpoint( 'load_query_page' ) || Api::is_current_endpoint( 'query_result' ) || $query->get( 'brx_is_search' ) === true;
 
@@ -66,9 +66,11 @@ class Search {
 		global $pagenow, $wpdb;
 
 		if ( $this->is_search( $query ) ) {
-			$where = preg_replace(
+			// Only search from Bricks data content
+			$meta_key = $wpdb->prepare( '%s', BRICKS_DB_PAGE_CONTENT );
+			$where    = preg_replace(
 				'/\(\s*' . $wpdb->posts . ".post_title\s+LIKE\s*(\'[^\']+\')\s*\)/",
-				'(' . $wpdb->posts . '.post_title LIKE $1) OR (bricksdata.meta_value LIKE $1)',
+				'(' . $wpdb->posts . '.post_title LIKE $1) OR (bricksdata.meta_key =' . $meta_key . ' AND bricksdata.meta_value LIKE $1)',
 				$where
 			);
 		}

@@ -63,6 +63,9 @@ class Filter_Radio extends Filter_Element {
 	 * If is a sort input
 	 * - Set sorting options
 	 *
+	 * If is a per_page input
+	 * - Set per_page options
+	 *
 	 * If is a filter input
 	 * - Prepare sources
 	 * - Set data_source
@@ -88,26 +91,18 @@ class Filter_Radio extends Filter_Element {
 			}
 
 			$this->prepare_sources();
-
-			// User wish to use what options as filter options
-			switch ( $settings['filterSource'] ) {
-				case 'taxonomy':
-					$this->set_data_source_from_taxonomy();
-					break;
-				case 'wpField':
-					$this->set_data_source_from_wp_field();
-					break;
-				case 'customField':
-					$this->set_data_source_from_custom_field();
-					break;
-			}
-
+			$this->set_data_source();
 			$this->set_options_with_count();
 		}
 
-		// Sort
-		else {
+		elseif ( $filter_action === 'sort' ) {
+			// User wish to use what options as sort options
 			$this->setup_sort_options();
+		}
+
+		else {
+			// User wish to use what options as per_page options
+			$this->setup_per_page_options();
 		}
 
 		// Insert filter settings as data-brx-filter attribute
@@ -186,7 +181,7 @@ class Filter_Radio extends Filter_Element {
 			$option_value    = esc_attr( $option['value'] );
 			$option_text     = $this->get_option_text_with_count( $option );
 			$option_class    = esc_attr( $option['class'] );
-			$option_checked  = self::is_option_value_matched( urldecode( $option_value ), $current_value );
+			$option_checked  = self::is_option_value_matched( rawurldecode( $option_value ), $current_value );
 			$option_disabled = isset( $option['disabled'] );
 
 			$li_key    = 'li_' . $index;
@@ -200,6 +195,11 @@ class Filter_Radio extends Filter_Element {
 
 			$this->set_attribute( $span_key, 'class', 'brx-option-text' );
 			$this->set_attribute( $label_key, 'class', $option_class );
+
+			// Set brx-option-all class for the "All" option (Easier identify for Filter-empty interaction) (@since 2.0)
+			if ( isset( $option['is_all'] ) && $option['is_all'] ) {
+				$this->set_attribute( $li_key, 'class', 'brx-option-all' );
+			}
 
 			if ( $option_checked ) {
 				// Set checked attribute

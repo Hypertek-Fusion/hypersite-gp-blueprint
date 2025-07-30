@@ -234,6 +234,12 @@ class Provider_Metabox extends Base {
 					$value = isset( $value[0]['ID'] ) ? wp_list_pluck( $value, 'ID' ) : $value;
 					break;
 
+				// @since 2.0
+				case 'icon':
+					$value                    = self::get_icon( $field, $value );
+					$filters['skip_sanitize'] = true;
+					break;
+
 				case 'image':
 				case 'image_advanced':
 				case 'image_upload':
@@ -694,11 +700,6 @@ class Provider_Metabox extends Base {
 
 		// Relationship
 		if ( $field['_brx_object_type'] == 'relationship' ) {
-			$api_args = [
-				'id' => $field['id'],
-				// 'from' or 'to' to be set
-			];
-
 			$queried_object = \Bricks\Helpers::get_queried_object( $post_id );
 
 			/**
@@ -711,31 +712,53 @@ class Provider_Metabox extends Base {
 				$queried_object = get_queried_object();
 			}
 
-			// STEP: Calculate the "from" or "to" argument according to the context and the field object type
-			foreach ( [
-				'post' => 'WP_Post',
-				'term' => 'WP_Term',
-				'user' => 'WP_User'
-			] as $object_type => $object_class ) {
+			// Function to set the relationship arguments
+			$set_relationship_args = function( $current_object ) use ( $field ) {
+				$api_args = [
+					'id' => $field['id'],
+					// 'from' or 'to' to be set
+				];
 
-				foreach ( [ 'from', 'to' ] as $direction ) {
-					// Queried object type is the same as the field direction object type
-					if ( is_a( $queried_object, $object_class ) && $field[ $direction ]['object_type'] == $object_type ) {
+				foreach ( [
+					'post' => 'WP_Post',
+					'term' => 'WP_Term',
+					'user' => 'WP_User'
+				] as $object_type => $object_class ) {
 
-						if ( $object_type == 'post' && in_array( $queried_object->post_type, $field[ $direction ]['meta_box']['post_types'] ) ) {
-							$api_args[ $direction ] = $queried_object->ID;
-						} elseif ( $object_type == 'term' && in_array( $queried_object->taxonomy, $field[ $direction ]['meta_box']['taxonomies'] ) ) {
-							$api_args[ $direction ] = $queried_object->term_id;
-						} elseif ( $object_type == 'user' ) {
-							$api_args[ $direction ] = $queried_object->ID;
+					foreach ( [ 'from', 'to' ] as $direction ) {
+						// Queried object type is the same as the field direction object type
+						if ( is_a( $current_object, $object_class ) && $field[ $direction ]['object_type'] == $object_type ) {
+
+							if ( $object_type == 'post' && in_array( $current_object->post_type, $field[ $direction ]['meta_box']['post_types'] ) ) {
+								$api_args[ $direction ] = $current_object->ID;
+							} elseif ( $object_type == 'term' && in_array( $current_object->taxonomy, $field[ $direction ]['meta_box']['taxonomies'] ) ) {
+								$api_args[ $direction ] = $current_object->term_id;
+							} elseif ( $object_type == 'user' ) {
+								$api_args[ $direction ] = $current_object->ID;
+							}
+
 						}
 
-					}
-
-					if ( isset( $api_args[ $direction ] ) ) {
-						break( 2 );
+						if ( isset( $api_args[ $direction ] ) ) {
+							break( 2 );
+						}
 					}
 				}
+
+				return $api_args;
+			};
+
+			// STEP: Calculate the "from" or "to" argument according to the context and the field object type
+			$api_args = $set_relationship_args( $queried_object );
+
+			/**
+			 * In Builder, the queried_object could be wrong or retrieve incorrectly when located in nested query, especially in different context loops
+			 * Helpers::get_queried_object will use the get_post() if bricks_is_ajax()
+			 *
+			 * @since 1.12.2
+			 */
+			if ( count( $api_args ) != 2 && \Bricks\Helpers::is_bricks_preview() && $looping_query_id ) {
+				$api_args = $set_relationship_args( \Bricks\Query::get_loop_object( $looping_query_id ) );
 			}
 
 			// STEP: Query
@@ -808,6 +831,7 @@ class Provider_Metabox extends Base {
 			'password'          => [ self::CONTEXT_TEXT ],
 			'range'             => [ self::CONTEXT_TEXT ],
 			'select_advanced'   => [ self::CONTEXT_TEXT ],
+			'icon'              => [ self::CONTEXT_TEXT ],
 			'radio'             => [ self::CONTEXT_TEXT ],
 			'select'            => [ self::CONTEXT_TEXT ],
 			'image_select'      => [ self::CONTEXT_TEXT ], // @since 1.6.2
@@ -890,6 +914,7 @@ class Provider_Metabox extends Base {
 			'image',
 			'image_upload',
 			'single_image',
+			'relationship',
 		];
 
 		$supported_tags = [];
@@ -926,4 +951,152 @@ class Provider_Metabox extends Base {
 
 		return $supported_tags;
 	}
+
+	/**
+	 * Retrieve icon by value, from icon field type
+	 *
+	 * @since 2.0
+	 */
+	public static function get_icon( $field, $value ) {
+		// Get all available icons
+		$icons = self::get_available_icons( $field, $value );
+
+		// Loop over icon options, and select the one that matches the value
+		foreach ( $icons as $icon ) {
+			if ( $icon['name'] === $value ) {
+
+				// If "icon" field is set, we need to enqueue the icon CSS
+				if ( isset( $icon['icon'] ) ) {
+
+					// If "icon_css" is a string, directly enqueue the CSS file
+					if ( is_string( $field['icon_css'] ) ) {
+						$unique_handle = 'bricks-icon-' . md5( $field['icon_css'] ); // Generate unique handle
+						wp_enqueue_style( $unique_handle, $field['icon_css'], [], BRICKS_VERSION );
+
+						// If "icon_css" is not a string, but a callable, call it
+					} elseif ( is_callable( $field['icon_css'] ) ) {
+						$field['icon_css']();
+					}
+
+					// Return the icon eg. <i class="fa fa-icon-name"></i>
+					return $icon['icon'];
+				}
+
+				// If "svg" field is set, directly return the SVG
+				elseif ( isset( $icon['svg'] ) ) {
+					return $icon['svg'];
+				}
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Retrieve all icons used for icon field type
+	 *
+	 * @return array of icons
+	 *      - Option 1: ['name' => 'icon-name', 'icon' => '<i class="fa fa-icon-name"></i>']
+	 *      - Option 2: ['name' => 'icon-name', 'svg' => '<svg>...</svg>']
+	 *
+	 * @since 2.0
+	 */
+	public static function get_available_icons( $field, $value ) {
+		// We will store a list of icons here
+		$icons = [];
+
+		// STEP: Parse icons from file (SVG)
+		if ( ! empty( $field['icon_dir'] ) ) {
+			$directory = $field['icon_dir'];
+
+			// If directory does not exists, return empty array
+			if ( ! is_dir( $directory ) ) {
+				return [];
+			}
+
+			// Get file where $value is file name (.svg)
+			$file = trailingslashit( $directory ) . $value . '.svg';
+			if ( file_exists( $file ) ) {
+				$icons[] = [
+					'name' => $value,
+					'svg'  => file_get_contents( $file ),
+				];
+			}
+		}
+
+		// STEP: Parse icon as CSS
+		elseif ( ! empty( $field['icon_css'] ) ) {
+
+			// Just directly return the value as icon
+			$icons[] = [
+				'name' => $value,
+				'icon' => sprintf( '<i class="%s"></i>', $value ),
+			];
+		}
+
+		// STEP: Parse icons from file (JSON)
+		elseif ( ! empty( $field['icon_file'] ) ) {
+			$file     = $field['icon_file'];
+			$icon_set = $field['icon_set'];
+
+			// If file does not exists, return empty array
+			if ( ! file_exists( $file ) ) {
+				return [];
+			}
+
+			// Get file content and decode it
+			$data = json_decode( file_get_contents( $file ), true );
+
+			// If json decode failed, return empty array
+			if ( json_last_error() !== JSON_ERROR_NONE ) {
+				return [];
+			}
+
+			// Loop over all parsed icons and add them to the list
+			foreach ( $data as $key => $icon ) {
+
+				// Default: Font Awesome (Free & Pro)
+				if ( $icon_set === 'font-awesome-free' || $icon_set === 'font-awesome-pro' ) {
+
+					// To be compatible with FA Pro, we need to loop over all styles,
+					// because FA Pro can have more styles than FA Free (only one).
+					foreach ( $icon['styles'] as $style ) {
+						$icons[] = [
+							'name' => "fa-{$style} fa-{$key}",
+							'svg'  => $icon['svg'][ $style ]['raw'],
+						];
+					}
+				}
+
+				 // JSON file that contains SVG icons
+				elseif ( is_string( $key ) ) {
+
+					  // If it's array - custom label (icon:svg_json) like (icon:{'svg':'<svg>...</svg>', label:'Custom Label'})
+					if ( is_array( $icon ) ) {
+						$svg = $icon['svg'] ?? null;
+					}
+					  // If it's string - default label (icon:svg)
+					else {
+						$svg = str_contains( $icon, '<svg' ) ? $icon : null;
+					}
+
+					  // Only add icon if it has a SVG
+					if ( isset( $svg ) && ! is_null( $svg ) ) {
+						$icons[] = [
+							'name' => $key,
+							'svg'  => $svg,
+						];
+					}
+				}
+
+					// If nothing is found, return empty array
+				else {
+					return [];
+				}
+			}
+		}
+
+			return $icons;
+	}
+
 }

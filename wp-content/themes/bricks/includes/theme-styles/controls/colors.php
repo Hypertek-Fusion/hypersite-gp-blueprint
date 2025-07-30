@@ -156,5 +156,7 @@ $controls['colorDanger'] = [
 return [
 	'name'        => 'colors',
 	'controls'    => $controls,
-	'cssSelector' => ':root', // @since 1.3 (see: #mvdca2)
+	// :root is used (@since 1.3; #mvdca2)
+	// :where() is used (@since 2.0; #86bwecegw)
+	'cssSelector' => ':where(:root)',
 ];

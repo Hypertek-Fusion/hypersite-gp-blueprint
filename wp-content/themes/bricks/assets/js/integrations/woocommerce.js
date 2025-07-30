@@ -448,6 +448,33 @@ function bricksWooProductGalleryEnhance() {
 			}
 		})
 	})
+
+	/**
+	 * Observer, that will resize gallery when it's intersecting
+	 *
+	 * Fixes issue with gallery not resizing properly, if hidden by default.
+	 *
+	 * Example: Inside nested tabs, accordion, etc.
+	 *
+	 * @since 1.12.2
+	 */
+	const imageGalleryObserver = new IntersectionObserver((entries) => {
+		entries.forEach((entry) => {
+			// Skip, if not intersecting
+			if (!entry.isIntersecting) return
+
+			// Resize the gallery
+			jQuery(entry.target).resize()
+
+			// Unobserve, as we only need to resize once (performance)
+			imageGalleryObserver.unobserve(entry.target)
+		})
+	})
+
+	// Observe all galleries and thumbnail sliders (@since 1.12.2)
+	jQuery('.woocommerce-product-gallery, .brx-product-gallery-thumbnail-slider').each(function () {
+		imageGalleryObserver.observe(this)
+	})
 }
 
 /**
@@ -1426,6 +1453,185 @@ function bricksCheckoutLoginForm() {
 	bricksCheckoutLoginFormFn.run()
 }
 
+/**
+ * Handle variation swatches interactions
+ *
+ * @since 2.0
+ */
+const bricksWooVariationSwatchesFn = new BricksFunction({
+	parentNode: document,
+	selector: '.bricks-variation-swatches',
+	windowVariableCheck: ['bricksWooCommerce.useVariationSwatches'],
+	eachElement: (swatchesContainer) => {
+		const swatches = swatchesContainer.querySelectorAll('li')
+		const originalSelect = swatchesContainer.nextElementSibling?.querySelector('select')
+		const variationForm = swatchesContainer.closest('.variations_form')
+
+		if (!swatches.length || !originalSelect) {
+			return
+		}
+
+		// Handle swatch click
+		swatches.forEach((swatch) => {
+			swatch.addEventListener('click', () => {
+				// Skip if swatch is disabled
+				if (swatch.classList.contains('disabled')) {
+					return
+				}
+
+				// Update swatch selection
+				swatches.forEach((s) => s.classList.remove('bricks-swatch-selected'))
+				swatch.classList.add('bricks-swatch-selected')
+
+				// Update the original select - WooCommerce will handle emitting the change event
+				originalSelect.value = swatch.dataset.value
+				jQuery(originalSelect).trigger('change')
+			})
+		})
+
+		// Listen for changes on the original select (for reset)
+		jQuery(originalSelect).on('change', () => {
+			const value = originalSelect.value
+			swatches.forEach((swatch) => {
+				swatch.classList.toggle('bricks-swatch-selected', swatch.dataset.value === value)
+			})
+		})
+
+		// Only apply disabled states for variation forms
+		if (variationForm) {
+			// Get the attribute name from the select
+			const attributeName = originalSelect.name
+
+			// Listen for found_variation event to update available options and swatch images
+			jQuery(variationForm).on('found_variation', function (event, variation) {
+				updateAvailableOptions(swatchesContainer, variationForm, attributeName)
+				updateSelectedImageSwatch(swatchesContainer, variation, attributeName)
+			})
+
+			// Listen for hide_variation event to update available options and reset swatch images
+			jQuery(variationForm).on('hide_variation', function () {
+				updateAvailableOptions(swatchesContainer, variationForm, attributeName)
+				updateSelectedImageSwatch(swatchesContainer, null, attributeName)
+			})
+
+			// Listen for check_variations event to update available options
+			jQuery(variationForm).on('check_variations', function () {
+				updateAvailableOptions(swatchesContainer, variationForm, attributeName)
+				updateSelectedImageSwatch(swatchesContainer, null, attributeName)
+			})
+
+			// Listen for woocommerce_update_variation_values to update available options
+			jQuery(document).on('woocommerce_update_variation_values', function () {
+				updateAvailableOptions(swatchesContainer, variationForm, attributeName)
+				updateSelectedImageSwatch(swatchesContainer, null, attributeName)
+			})
+
+			// Initial update on load
+			setTimeout(() => {
+				updateAvailableOptions(swatchesContainer, variationForm, attributeName)
+			}, 100)
+		}
+	}
+})
+
+/**
+ * Update available options for variation swatches
+ *
+ * @since 2.0
+ *
+ * @param {HTMLElement} swatchesContainer The swatches container element
+ * @param {HTMLElement} variationForm The variation form element
+ * @param {string} attributeName The attribute name
+ */
+function updateAvailableOptions(swatchesContainer, variationForm, attributeName) {
+	// Get all swatches
+	const swatches = swatchesContainer.querySelectorAll('li')
+
+	// Get the original select
+	const originalSelect = swatchesContainer.nextElementSibling?.querySelector('select')
+
+	if (!originalSelect) {
+		return
+	}
+
+	// Get available options from the select
+	const availableOptions = []
+
+	// Loop through options and push available ones to array
+	for (let i = 0; i < originalSelect.options.length; i++) {
+		const option = originalSelect.options[i]
+
+		// Skip empty option
+		if (!option.value) {
+			continue
+		}
+
+		// Check if option is disabled
+		if (!option.disabled) {
+			availableOptions.push(option.value)
+		}
+	}
+
+	// Update swatches based on available options
+	swatches.forEach((swatch) => {
+		// Get swatch value
+		const swatchValue = swatch.dataset.value
+
+		// Set disabled class based on availability
+		if (availableOptions.includes(swatchValue)) {
+			swatch.classList.remove('disabled')
+		} else {
+			swatch.classList.add('disabled')
+		}
+	})
+}
+
+/**
+ * Update selected image swatch source based on the matched variation
+ *
+ * @param {HTMLElement} swatchesContainer The swatches container element
+ * @param {object|null} variation The variation data object (or null to reset)
+ * @param {string} attributeName The attribute name (e.g. attribute_pa_pattern)
+ */
+function updateSelectedImageSwatch(swatchesContainer, variation, attributeName) {
+	// Only apply to image-type swatches
+	if (!swatchesContainer.classList.contains('bricks-swatch-image')) {
+		return
+	}
+
+	// Get all swatches with variation-based images
+	const variationSwatches = swatchesContainer.querySelectorAll('li[data-image-origin="variation"]')
+
+	if (!variationSwatches.length) {
+		return
+	}
+
+	// Process each variation-based swatch
+	variationSwatches.forEach((swatch) => {
+		const imgEl = swatch.querySelector('img')
+
+		if (!imgEl) {
+			return
+		}
+
+		// Cache the original src so we can restore it later
+		if (!imgEl.dataset.origSrc) {
+			imgEl.dataset.origSrc = imgEl.getAttribute('src')
+		}
+
+		// Use variation image if provided, otherwise restore to original
+		if (variation && variation.image && variation.image.src) {
+			imgEl.setAttribute('src', variation.image.src)
+		} else {
+			imgEl.setAttribute('src', imgEl.dataset.origSrc)
+		}
+	})
+}
+
+function bricksWooVariationSwatches() {
+	bricksWooVariationSwatchesFn.run()
+}
+
 document.addEventListener('DOMContentLoaded', function (event) {
 	bricksWooProductsFilter()
 	bricksWooMiniModals()
@@ -1438,10 +1644,26 @@ document.addEventListener('DOMContentLoaded', function (event) {
 	bricksCheckoutCouponForm()
 	bricksCheckoutLoginToggle()
 	bricksCheckoutLoginForm()
+	bricksWooVariationSwatches()
 
 	// Small timeout required to allow other plugins (e.g. WooCommerce Composite Products) to generate additional content (@since 1.8)
 	setTimeout(function () {
 		bricksWooQuantityTriggersFn.run()
 		bricksWooLoopQtyListenerFn.run()
 	}, 150)
+})
+
+// Resize product gallery after all CSS is loaded (@since 2.0)
+window.addEventListener('load', () => {
+	if (
+		!bricksIsFrontend ||
+		typeof jQuery === 'undefined' ||
+		typeof jQuery(this).wc_product_gallery === 'undefined'
+	) {
+		return
+	}
+
+	jQuery('.woocommerce-product-gallery').each(function () {
+		jQuery(this).resize()
+	})
 })

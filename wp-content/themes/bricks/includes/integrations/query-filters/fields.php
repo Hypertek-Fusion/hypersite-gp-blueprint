@@ -8,13 +8,8 @@ class Fields {
 	public static $providers = [];
 
 	public function __construct() {
-		$providers = [ 'acf', 'metabox' ];
-		foreach ( $providers as $provider ) {
-			$provider_class = 'Bricks\Integrations\Query_Filters\Field_' . ucfirst( $provider );
-			if ( class_exists( $provider_class ) ) {
-				self::$providers[ $provider ] = new $provider_class();
-			}
-		}
+		// Must be called on init to ensure all providers are loaded (@since 1.12.2)
+		add_action( 'init', [ $this, 'register_providers' ] );
 	}
 
 	/**
@@ -28,8 +23,31 @@ class Fields {
 		return self::$instance;
 	}
 
+	/**
+	 * Register the field providers
+	 *
+	 * @since 1.12.2
+	 */
+	public function register_providers() {
+		$providers = [ 'acf', 'metabox' ];
+
+		foreach ( $providers as $provider ) {
+			$provider_class = 'Bricks\Integrations\Query_Filters\Field_' . ucfirst( $provider );
+
+			if ( class_exists( $provider_class ) ) {
+				self::$providers[ $provider ] = new $provider_class();
+			}
+		}
+	}
+
+	/**
+	 * Builder: Retrieve the active provider list
+	 *
+	 * @since 1.12.2
+	 */
 	public static function get_active_provider_list() {
 		$active_providers = [];
+
 		foreach ( self::$providers as $provider => $instance ) {
 			if ( $instance::is_active() ) {
 				$active_providers[ $provider ] = $instance->get_name();

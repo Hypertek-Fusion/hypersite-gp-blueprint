@@ -52,9 +52,21 @@ class Email extends Base {
 		// Default message
 		else {
 			$processed_message = $message; // Ensure all fields message is still set if no custom message is used
-			// Append referer
+		}
+
+		/**
+		 * Append default text if:
+		 * 1. We have a $custom_message, but $processed_message is empty (ex: {{all_fields}}, but only field is "file". #86c3axazv)
+		 * 2. We don't have a $custom_message
+		 *
+		 * @since 2.0
+		 */
+		if ( ( $custom_message && empty( $processed_message ) ) || empty( $custom_message ) ) {
 			if ( isset( $_POST['referrer'] ) ) {
 				$processed_message .= "{$line_break}{$line_break}" . esc_html__( 'Message sent from:', 'bricks' ) . ' ' . esc_url( $_POST['referrer'] );
+			} else {
+				// Fallback to page name
+				$processed_message .= "{$line_break}{$line_break}" . esc_html__( 'Message sent from:', 'bricks' ) . ' ' . get_bloginfo( 'name' );
 			}
 		}
 
@@ -174,7 +186,7 @@ class Email extends Base {
 				[
 					'action'  => $this->name,
 					'type'    => 'error',
-					'message' => ! empty( $form_settings['emailErrorMessage'] ) ? $form_settings['emailErrorMessage'] : '',
+					'message' => ! empty( $form_settings['emailErrorMessage'] ) ? $form->render_data( $form_settings['emailErrorMessage'] ) : '',
 					'content' => $message,
 				]
 			);
@@ -200,6 +212,11 @@ class Email extends Base {
 
 			// Skip: Form field type 'file' and 'html'
 			if ( $field['type'] === 'file' || $field['type'] === 'html' ) {
+				continue;
+			}
+
+			// Skip: Fields that are defined as honeypot (@since 1.12.2)
+			if ( isset( $field['isHoneypot'] ) ) {
 				continue;
 			}
 

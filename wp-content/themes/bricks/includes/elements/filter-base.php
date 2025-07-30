@@ -98,10 +98,40 @@ class Filter_Element extends Element {
 		$this->query_settings = Query::get_query_by_element_id( $query_id )->settings['query'] ?? [];
 
 		// Get filtered data from index
-		$this->filtered_source = Query_Filters::get_filtered_data_from_index( $this->id, Query_Filters::get_filter_object_ids( $query_id ) );
+		$this->filtered_source = apply_filters( 'bricks/filter_element/filtered_source', Query_Filters::get_filtered_data_from_index( $this->id, Query_Filters::get_filter_object_ids( $query_id ) ), $this );
 
 		// Get choices data from index - for custom field filter
 		$this->choices_source = Query_Filters::get_filtered_data_from_index( $this->id, Query_Filters::get_filter_object_ids( $query_id, 'original' ) );
+	}
+
+	public function set_data_source() {
+		$settings      = $this->settings;
+		$filter_action = $settings['filterAction'] ?? 'filter';
+		$filter_source = $settings['filterSource'] ?? false;
+
+		if ( $filter_action !== 'filter' || ! $filter_source ) {
+			return;
+		}
+
+		$data_source = [];
+
+		switch ( $filter_source ) {
+			case 'taxonomy':
+				$data_source = $this->set_data_source_from_taxonomy();
+				break;
+			case 'wpField':
+				$data_source = $this->set_data_source_from_wp_field();
+				break;
+			case 'customField':
+				$data_source = $this->set_data_source_from_custom_field();
+				break;
+			default:
+				// Undocumented (WooCommerce)
+				$data_source = apply_filters( 'bricks/filter_element/data_source_' . $filter_source, [], $this );
+				break;
+		}
+
+		$this->data_source = $data_source;
 	}
 
 	public function set_data_source_from_taxonomy() {
@@ -109,7 +139,7 @@ class Filter_Element extends Element {
 		$taxonomy = $settings['filterTaxonomy'] ?? false;
 
 		if ( ! $taxonomy ) {
-			return;
+			return [];
 		}
 
 		$args = [
@@ -180,6 +210,11 @@ class Filter_Element extends Element {
 		// Term order by
 		if ( isset( $settings['filterTaxonomyOrderBy'] ) ) {
 			$args['orderby'] = sanitize_text_field( $settings['filterTaxonomyOrderBy'] );
+
+			// Set order 'meta_key' If orderby is 'meta_value' or 'meta_value_num' (@since 1.12.2)
+			if ( in_array( $args['orderby'], [ 'meta_value', 'meta_value_num' ], true ) ) {
+				$args['meta_key'] = isset( $settings['filterTaxonomyOrderMetaKey'] ) ? sanitize_text_field( $settings['filterTaxonomyOrderMetaKey'] ) : '';
+			}
 		}
 
 		// Top level only
@@ -250,14 +285,10 @@ class Filter_Element extends Element {
 				];
 			}
 
-			// Set data source
-			$this->data_source = $data_source;
-
-			// Not in use anymore @since 1.11 as input name follows the element ID.
-			// Otherwise multiple filter with same input name will cause issue.
-			// Change the input name to match the taxonomy
-			// $this->input_name = $taxonomy;
+			return $data_source;
 		}
+
+		return [];
 	}
 
 	/**
@@ -274,6 +305,7 @@ class Filter_Element extends Element {
 		switch ( $field_type ) {
 			case 'post':
 			case 'user':
+			case 'term':
 				if ( $field_type === 'post' ) {
 					$selected_field = $settings['wpPostField'] ?? false;
 
@@ -292,6 +324,16 @@ class Filter_Element extends Element {
 					}
 
 					$selected_field_label = $this->controls['wpUserField']['options'][ $selected_field ] ?? esc_html__( 'Option', 'bricks' );
+				}
+
+				if ( $field_type === 'term' ) {
+					$selected_field = $settings['wpTermField'] ?? false;
+
+					if ( ! $selected_field ) {
+						return;
+					}
+
+					$selected_field_label = $this->controls['wpTermField']['options'][ $selected_field ] ?? esc_html__( 'Option', 'bricks' );
 				}
 
 				// Use choices source
@@ -359,14 +401,10 @@ class Filter_Element extends Element {
 				}
 
 				break;
-
-			// Not in Beta
-			case 'term':
-				break;
 		}
 
 		// Set data source
-		$this->data_source = $data_source;
+		return $data_source;
 	}
 
 	public function set_data_source_from_custom_field() {
@@ -377,7 +415,7 @@ class Filter_Element extends Element {
 		$custom_label_mapping = $settings['customLabelMapping'] ?? false;
 
 		if ( ! $source_field_type || ! $custom_field_key ) {
-			return;
+			return [];
 		}
 
 		$data_source = [];
@@ -396,7 +434,7 @@ class Filter_Element extends Element {
 				if ( $this->filter_type === 'select' ) {
 					$data_source[] = [
 						'value'          => '',
-						'text'           => sprintf( '%s %s', esc_html__( 'Select', 'bricks' ), esc_html__( 'Option', 'bricks' ) ),
+						'text'           => esc_html__( 'Select option', 'bricks' ),
 						'class'          => 'placeholder',
 						'is_placeholder' => true,
 					];
@@ -462,7 +500,7 @@ class Filter_Element extends Element {
 				break;
 		}
 
-		$this->data_source = $data_source;
+		return $data_source;
 	}
 
 	/**
@@ -516,7 +554,7 @@ class Filter_Element extends Element {
 			$filters_affecting_count = array_filter(
 				$active_filters,
 				function( $filter ) {
-					return isset( $filter['query_type'] ) && $filter['query_type'] !== 'sort' && $filter['query_type'] !== 'pagination';
+					return isset( $filter['query_type'] ) && $filter['query_type'] !== 'sort' && $filter['query_type'] !== 'pagination' && $filter['query_type'] !== 'per_page';
 				}
 			);
 
@@ -583,143 +621,148 @@ class Filter_Element extends Element {
 			// Get the count source
 			if ( count( $count_query_vars ) > 0 ) {
 				$count_source = Query_Filters::get_filtered_data_from_index( $this->id, Query_Filters::get_filter_object_ids( $query_id, 'original', $count_query_vars ) );
+
+				// Undocumented (WooCommerce)
+				$count_source = apply_filters( 'bricks/filter_element/count_source_' . $filter_source, $count_source, $this );
 			}
 		}
 
 		// STEP: Populate options
-		foreach ( $data_source as $source ) {
-			$option = [
-				'value'          => $source['value'] ?? '',
-				'text'           => $source['text'] ?? '',
-				'class'          => $source['class'] ?? '',
-				'is_all'         => $source['is_all'] ?? false,
-				'is_placeholder' => $source['is_placeholder'] ?? false,
-				'count'          => $source['count'] ?? 0,
-				'depth'          => $source['depth'] ?? 0,
-				'children_ids'   => $source['children_ids'] ?? [],
-			];
+		if ( is_array( $data_source ) && ! empty( $data_source ) ) {
+			foreach ( $data_source as $source ) {
+				$option = [
+					'value'          => $source['value'] ?? '',
+					'text'           => $source['text'] ?? '',
+					'class'          => $source['class'] ?? '',
+					'is_all'         => $source['is_all'] ?? false,
+					'is_placeholder' => $source['is_placeholder'] ?? false,
+					'count'          => $source['count'] ?? 0,
+					'depth'          => $source['depth'] ?? 0,
+					'children_ids'   => $source['children_ids'] ?? [],
+				];
 
-			// Get count from filtered data
-			if ( ! $option['is_all'] && ! $option['is_placeholder'] ) {
-				// Default use count from data source
-				$count = $option['count'];
+				// Get count from filtered data
+				if ( ! $option['is_all'] && ! $option['is_placeholder'] ) {
+					// Default use count from data source
+					$count = $option['count'];
 
-				/**
-				 * Decide whether use count from filtered_source or count_source
-				 *
-				 * filtered_source: count from the filtered data
-				 * count_source: count from the filtered data where query_vars are affected by other active filters
-				 *
-				 * @since 1.11
-				 */
-				$check_count_array = [];
+					/**
+					 * Decide whether use count from filtered_source or count_source
+					 *
+					 * filtered_source: count from the filtered data
+					 * count_source: count from the filtered data where query_vars are affected by other active filters
+					 *
+					 * @since 1.11
+					 */
+					$check_count_array = [];
 
-				// This filter is active and there are other active filters, use count source
-				if ( $this_active_filter !== false && count( $other_active_filters ) > 0 ) {
-					if ( empty( $count_source ) ) {
-						// No count source, set count to 0
-						$count = 0;
-					} else {
-						$check_count_array        = $count_source;
-						$not_found_option_as_zero = true;
-					}
-				}
-
-				// This filter is not active and there are other active filters, use filtered source
-				elseif ( count( $other_active_filters ) > 0 ) {
-					if ( empty( $filtered_source ) ) {
-						// No filtered source, set count to 0
-						$count = 0;
-					} else {
-						$check_count_array        = $filtered_source;
-						$not_found_option_as_zero = true;
-					}
-				}
-
-				// No other active filters
-				else {
-					if ( $this->name === 'filter-checkbox' ) {
-						// Checkbox: Always use filtered source
-						$check_count_array = $filtered_source;
-						// If checkbox combine logic is AND, set not_found_option_as_zero to true
-						$not_found_option_as_zero = $combine_logic === 'AND';
-					} else {
-						// Other filters: Use filtered source if this filter is not active
-						if ( $this_active_filter === false ) {
-							$check_count_array = $filtered_source;
-							// Don't set not_found_option_as_zero or other options will be disabled
-							$not_found_option_as_zero = false;
-						}
-						// Reach here, this filter is active, use current count, don't set $check_count_array
-					}
-				}
-
-				// Find the count from the check_count_array
-				if ( ! empty( $check_count_array ) ) {
-					$found = false;
-					foreach ( $check_count_array as $counted ) {
-						// Loop through the source and check if the value is current option value
-						if ( self::is_option_value_matched( $counted['filter_value'], $option['value'] ) ) {
-							$count = $counted['count'];
-							$found = true;
-							break;
+					// This filter is active and there are other active filters, use count source
+					if ( $this_active_filter !== false && count( $other_active_filters ) > 0 ) {
+						if ( empty( $count_source ) ) {
+							// No count source, set count to 0
+							$count = 0;
+						} else {
+							$check_count_array        = $count_source;
+							$not_found_option_as_zero = true;
 						}
 					}
 
-					if ( ! $found && $not_found_option_as_zero ) {
-						// This option is not found in the count array, set count to 0
-						$count = 0;
+					// This filter is not active and there are other active filters, use filtered source
+					elseif ( count( $other_active_filters ) > 0 ) {
+						if ( empty( $filtered_source ) ) {
+							// No filtered source, set count to 0
+							$count = 0;
+						} else {
+							$check_count_array        = $filtered_source;
+							$not_found_option_as_zero = true;
+						}
 					}
-				}
 
-				// Update option count
-				$option['count'] = $count;
-			}
-
-			// Farget query results count is 0: set count to 0, if this filter is not active
-			if ( $query_results_count == 0 && $this_active_filter === false ) {
-				$option['count'] = 0;
-			}
-
-			// Disable the option if count is 0
-			if ( $option['count'] === 0 && ! $option['is_all'] && ! $option['is_placeholder'] ) {
-				$option['disabled'] = true;
-				$option['class']   .= ' brx-option-disabled';
-
-				if ( $hide_empty ) {
-					// skip to next option to avoid safari and empty <li> style issues (#86bxj43yg)
-					continue;
-				}
-			}
-
-			// Use custom 'filterLabelAll' text for all option (radio), and placeholder option (select)
-			if ( ( $option['is_all'] || $option['is_placeholder'] ) && isset( $settings['filterLabelAll'] ) ) {
-				$option['text'] = $settings['filterLabelAll'];
-			}
-
-			// Maybe hierarchy
-			if ( isset( $option['depth'] ) ) {
-				// Add depth-n class
-				$option['class'] .= ' depth-' . $option['depth'];
-
-				// Add dash prefix to the text (except for radio input which is using button display mode)
-				$indent = ! isset( $settings['displayMode'] ) || $settings['displayMode'] !== 'button';
-
-				if ( $indent && $option['depth'] != 0 ) {
-					// Custom indentation: Don't repeat
-					if ( isset( $settings['filterChildIndentation'] ) ) {
-						$option['text'] = esc_attr( $settings['filterChildIndentation'] ) . $option['text'];
-					}
-					// Default indentation: Repeat dash (one dash for each depth level)
+					// No other active filters
 					else {
-						$option['text'] = str_repeat( '&mdash;', $option['depth'] ) . ' ' . $option['text'];
+						if ( $this->name === 'filter-checkbox' ) {
+							// Checkbox: Always use filtered source
+							$check_count_array = $filtered_source;
+							// If checkbox combine logic is AND, set not_found_option_as_zero to true
+							$not_found_option_as_zero = $combine_logic === 'AND';
+						} else {
+							// Other filters: Use filtered source if this filter is not active
+							if ( $this_active_filter === false ) {
+								$check_count_array = $filtered_source;
+								// Don't set not_found_option_as_zero or other options will be disabled
+								$not_found_option_as_zero = false;
+							}
+							// Reach here, this filter is active, use current count, don't set $check_count_array
+						}
+					}
+
+					// Find the count from the check_count_array
+					if ( ! empty( $check_count_array ) ) {
+						$found = false;
+						foreach ( $check_count_array as $counted ) {
+							// Loop through the source and check if the value is current option value
+							if ( self::is_option_value_matched( $counted['filter_value'], $option['value'] ) ) {
+								$count = $counted['count'];
+								$found = true;
+								break;
+							}
+						}
+
+						if ( ! $found && $not_found_option_as_zero ) {
+							// This option is not found in the count array, set count to 0
+							$count = 0;
+						}
+					}
+
+					// Update option count
+					$option['count'] = $count;
+				}
+
+				// Farget query results count is 0: set count to 0, if this filter is not active
+				if ( $query_results_count == 0 && $this_active_filter === false ) {
+					$option['count'] = 0;
+				}
+
+				// Disable the option if count is 0
+				if ( $option['count'] === 0 && ! $option['is_all'] && ! $option['is_placeholder'] ) {
+					$option['disabled'] = true;
+					$option['class']   .= ' brx-option-disabled';
+
+					if ( $hide_empty ) {
+						// skip to next option to avoid safari and empty <li> style issues (#86bxj43yg)
+						continue;
 					}
 				}
+
+				// Use custom 'filterLabelAll' text for all option (radio), and placeholder option (select)
+				if ( ( $option['is_all'] || $option['is_placeholder'] ) && isset( $settings['filterLabelAll'] ) ) {
+					$option['text'] = $settings['filterLabelAll'];
+				}
+
+				// Maybe hierarchy
+				if ( isset( $option['depth'] ) ) {
+					// Add depth-n class
+					$option['class'] .= ' depth-' . $option['depth'];
+
+					// Add dash prefix to the text (except for radio input which is using button display mode)
+					$indent = ! isset( $settings['displayMode'] ) || $settings['displayMode'] !== 'button';
+
+					if ( $indent && $option['depth'] != 0 ) {
+						// Custom indentation: Don't repeat
+						if ( isset( $settings['filterChildIndentation'] ) ) {
+							$option['text'] = esc_attr( $settings['filterChildIndentation'] ) . $option['text'];
+						}
+						// Default indentation: Repeat dash (one dash for each depth level)
+						else {
+							$option['text'] = str_repeat( '&mdash;', $option['depth'] ) . ' ' . $option['text'];
+						}
+					}
+				}
+
+				$option['class'] = trim( $option['class'] );
+
+				$options[] = $option;
 			}
-
-			$option['class'] = trim( $option['class'] );
-
-			$options[] = $option;
 		}
 
 		$this->populated_options = $options;
@@ -742,15 +785,18 @@ class Filter_Element extends Element {
 		$no_bracket = isset( $settings['filterCountNoBracket'] );
 
 		// Return text only
-		if ( $hide_count || $is_all || $is_placeholder || $filter_action === 'sort' ) {
+		if ( $hide_count || $is_all || $is_placeholder || $filter_action === 'sort' || $filter_action === 'per_page' ) {
 			return $text;
 		}
 
 		$count = $no_bracket ? $count : "($count)";
 
-		// Wrap the count with span for filter-radio and filter-checkbox
 		if ( in_array( $this->name, [ 'filter-radio', 'filter-checkbox' ], true ) ) {
+			// Wrap the count with span for filter-radio and filter-checkbox
 			$count = '<span class="brx-option-count">' . $count . '</span>';
+		} else {
+			// For filter-select, add a space before the count (not controlled by CSS) (@since 1.12.3)
+			$count = ' ' . $count;
 		}
 
 		return $text . $count;
@@ -778,7 +824,7 @@ class Filter_Element extends Element {
 			// Add placeholder option
 			$options[] = [
 				'value'          => '',
-				'text'           => sprintf( '%s %s', esc_html__( 'Select', 'bricks' ), esc_html__( 'Sort', 'bricks' ) ),
+				'text'           => esc_html__( 'Select sort', 'bricks' ),
 				'class'          => 'placeholder',
 				'is_placeholder' => true,
 			];
@@ -815,6 +861,57 @@ class Filter_Element extends Element {
 		}
 
 		$this->populated_options = $options;
+	}
+
+	/**
+	 * For filter-select, filter-radio
+	 * Note: Not retrieving the per_page options from the query history for now
+	 *
+	 * @since 1.12.2
+	 */
+	public function setup_per_page_options() {
+		if ( ! in_array( $this->name, [ 'filter-select', 'filter-radio' ], true ) ) {
+			return;
+		}
+
+		$settings = $this->settings;
+
+		$options = [];
+
+		if ( $this->name === 'filter-select' ) {
+			// Add placeholder option
+			$options[] = [
+				'value'          => '',
+				'text'           => esc_html__( 'Results per page', 'bricks' ),
+				'class'          => 'placeholder',
+				'is_placeholder' => true,
+			];
+		}
+
+		// Get per page options array via settings
+		$per_page_array = self::get_per_page_options_array( $settings );
+
+		foreach ( $per_page_array as $per_page ) {
+			$options[] = [
+				'value' => $per_page,
+				'text'  => $per_page,
+				'class' => '',
+			];
+		}
+
+		$this->populated_options = $options;
+	}
+
+	public static function get_per_page_options_array( $settings = [] ) {
+		$per_page_string = $settings['perPageOptions'] ?? '10, 20, 50, 100';
+
+		// STEP: Convert string to array
+		$per_page_array = explode( ',', (string) $per_page_string );
+		$per_page_array = array_map( 'trim', $per_page_array );
+		// STEP: Ensure no empty value, and all unique values
+		$per_page_array = array_unique( array_filter( $per_page_array ) );
+
+		return $per_page_array;
 	}
 
 	/**
@@ -910,10 +1007,11 @@ class Filter_Element extends Element {
 		$controls = [];
 
 		$controls['filterQueryId'] = [
-			'type'        => 'query-list',
-			'label'       => esc_html__( 'Target query', 'bricks' ),
-			'placeholder' => esc_html__( 'Select', 'bricks' ),
-			'desc'        => esc_html__( 'Select the query this filter should target.', 'bricks' ) . ' ' . esc_html__( 'Only post queries are supported in this version.', 'bricks' ),
+			'type'             => 'query-list',
+			'label'            => esc_html__( 'Target query', 'bricks' ),
+			'placeholder'      => esc_html__( 'Select', 'bricks' ),
+			'excludeMainQuery' => true, // (@since 1.12.2)
+			'desc'             => esc_html__( 'Select the query this filter should target.', 'bricks' ) . ' ' . esc_html__( 'Only post queries are supported in this version.', 'bricks' ),
 		];
 
 		$controls['filterQueryIdInfo'] = [
@@ -970,8 +1068,9 @@ class Filter_Element extends Element {
 				'type'        => 'select',
 				'label'       => esc_html__( 'Action', 'bricks' ),
 				'options'     => [
-					'filter' => esc_html__( 'Filter', 'bricks' ),
-					'sort'   => esc_html__( 'Sort', 'bricks' ),
+					'filter'   => esc_html__( 'Filter', 'bricks' ),
+					'sort'     => esc_html__( 'Sort', 'bricks' ),
+					'per_page' => esc_html__( 'Results per page', 'bricks' ), // (@since 1.12.2)
 				],
 				'inline'      => true,
 				'placeholder' => esc_html__( 'Filter', 'bricks' ),
@@ -993,7 +1092,7 @@ class Filter_Element extends Element {
 				'placeholder' => esc_html__( 'Select', 'bricks' ),
 				'required'    => [
 					[ 'filterQueryId', '!=', '' ],
-					[ 'filterAction', '!=', 'sort' ],
+					[ 'filterAction', '=', [ '', 'filter' ] ],
 				],
 			];
 
@@ -1010,7 +1109,7 @@ class Filter_Element extends Element {
 				'placeholder' => esc_html__( 'Post', 'bricks' ),
 				'required'    => [
 					[ 'filterQueryId', '!=', '' ],
-					[ 'filterAction', '!=', 'sort' ],
+					[ 'filterAction', '=', [ '', 'filter' ] ],
 					[ 'filterSource', '=', [ 'wpField', 'customField' ] ],
 				],
 			];
@@ -1021,7 +1120,7 @@ class Filter_Element extends Element {
 				'label'       => esc_html__( 'Field', 'bricks' ),
 				'inline'      => true,
 				'options'     => [
-					'post_id'     => esc_html__( 'Post ID', 'bricks' ),
+					'post_id'     => esc_html__( 'Post title', 'bricks' ) . ' (ID)', // Change to title which makes more sense (@since 1.12.2)
 					'post_type'   => esc_html__( 'Post type', 'bricks' ),
 					'post_status' => esc_html__( 'Post status', 'bricks' ),
 					'post_author' => esc_html__( 'Post author', 'bricks' ),
@@ -1029,7 +1128,7 @@ class Filter_Element extends Element {
 				'placeholder' => esc_html__( 'Select', 'bricks' ),
 				'required'    => [
 					[ 'filterQueryId', '!=', '' ],
-					[ 'filterAction', '!=', 'sort' ],
+					[ 'filterAction', '=', [ '', 'filter' ] ],
 					[ 'filterSource', '=', 'wpField' ],
 					[ 'sourceFieldType', '=', [ '', 'post' ] ],
 				],
@@ -1041,34 +1140,32 @@ class Filter_Element extends Element {
 				'label'       => esc_html__( 'Field', 'bricks' ),
 				'inline'      => true,
 				'options'     => [
+					'user_id'   => esc_html__( 'User name', 'bricks' ) . ' (ID)', // (@since 2.0)
 					'user_role' => esc_html__( 'User role', 'bricks' ),
 				],
 				'placeholder' => esc_html__( 'Select', 'bricks' ),
 				'required'    => [
 					[ 'filterSource', '=', 'wpField' ],
 					[ 'sourceFieldType', '=', 'user' ],
-					[ 'filterAction', '!=', 'sort' ],
+					[ 'filterAction', '=', [ '', 'filter' ] ],
 				]
 			];
 
-			// source:term wpTermField - term name, term slug, taxonomy, term group
-			// Not in Beta
-			// $controls['wpTermField'] = [
-			// 'type'  => 'select',
-			// 'label' => esc_html__( 'Field', 'bricks' ),
-			// 'options' => [
-			// 'name' => esc_html__( 'Term name', 'bricks' ),
-			// 'slug' => esc_html__( 'Term slug', 'bricks' ),
-			// 'taxonomy' => esc_html__( 'Taxonomy', 'bricks' ),
-			// 'term_group' => esc_html__( 'Term group', 'bricks' ),
-			// ],
-			// 'placeholder' => esc_html__( 'Select', 'bricks' ),
-			// 'required' => [
-			// ['filterSource', '=', 'wpField'],
-			// ['sourceFieldType', '=', 'term'],
-			// ['filterAction', '!=', 'sort'],
-			// ]
-			// ];
+			// source:term wpTermField - term name (@since 2.0)
+			$controls['wpTermField'] = [
+				'type'        => 'select',
+				'label'       => esc_html__( 'Field', 'bricks' ),
+				'inline'      => true,
+				'options'     => [
+					'term_id' => esc_html__( 'Term name', 'bricks' ) . ' (ID)', // (@since 2.0)
+				],
+				'placeholder' => esc_html__( 'Select', 'bricks' ),
+				'required'    => [
+					[ 'filterSource', '=', 'wpField' ],
+					[ 'sourceFieldType', '=', 'term' ],
+					[ 'filterAction', '!=', 'sort' ],
+				]
+			];
 
 			$controls['filterTaxonomy'] = [
 				'type'          => 'select',
@@ -1078,7 +1175,7 @@ class Filter_Element extends Element {
 				'placeholder'   => esc_html__( 'Select', 'bricks' ),
 				'required'      => [
 					[ 'filterQueryId', '!=', '' ],
-					[ 'filterAction', '!=', 'sort' ],
+					[ 'filterAction', '=', [ '', 'filter' ] ],
 					[ 'filterSource', '=', 'taxonomy' ],
 				],
 				'clearOnChange' => [  // @since 1.11
@@ -1096,8 +1193,23 @@ class Filter_Element extends Element {
 				'placeholder' => esc_html__( 'Name', 'bricks' ),
 				'required'    => [
 					[ 'filterQueryId', '!=', '' ],
+					[ 'filterAction', '=', [ '', 'filter' ] ],
+					[ 'filterSource', '=', 'taxonomy' ],
+				],
+			];
+
+			// @since 1.12.2
+			$controls['filterTaxonomyOrderMetaKey'] = [
+				'type'           => 'text',
+				'label'          => esc_html__( 'Order meta key', 'bricks' ),
+				'inline'         => true,
+				'hasDynamicData' => false,
+				'placeholder'    => esc_html__( 'Meta key', 'bricks' ),
+				'required'       => [
+					[ 'filterQueryId', '!=', '' ],
 					[ 'filterAction', '!=', 'sort' ],
 					[ 'filterSource', '=', 'taxonomy' ],
+					[ 'filterTaxonomyOrderBy', '=', [ 'meta_value', 'meta_value_num' ] ],
 				],
 			];
 
@@ -1110,7 +1222,7 @@ class Filter_Element extends Element {
 				'placeholder' => esc_html__( 'ASC', 'bricks' ),
 				'required'    => [
 					[ 'filterQueryId', '!=', '' ],
-					[ 'filterAction', '!=', 'sort' ],
+					[ 'filterAction', '=', [ '', 'filter' ] ],
 					[ 'filterSource', '=', 'taxonomy' ],
 				],
 			];
@@ -1129,7 +1241,7 @@ class Filter_Element extends Element {
 				'inline'      => true,
 				'required'    => [
 					[ 'filterQueryId', '!=', '' ],
-					[ 'filterAction', '!=', 'sort' ],
+					[ 'filterAction', '=', [ '', 'filter' ] ],
 					[ 'filterSource', '=', 'taxonomy' ],
 					[ 'filterTaxonomy', '!=', '' ],
 				],
@@ -1150,7 +1262,7 @@ class Filter_Element extends Element {
 				'inline'      => true,
 				'required'    => [
 					[ 'filterQueryId', '!=', '' ],
-					[ 'filterAction', '!=', 'sort' ],
+					[ 'filterAction', '=', [ '', 'filter' ] ],
 					[ 'filterSource', '=', 'taxonomy' ],
 					[ 'filterTaxonomy', '!=', '' ],
 				],
@@ -1163,7 +1275,7 @@ class Filter_Element extends Element {
 				'label'    => esc_html__( 'Top level terms only', 'bricks' ),
 				'required' => [
 					[ 'filterQueryId', '!=', '' ],
-					[ 'filterAction', '!=', 'sort' ],
+					[ 'filterAction', '=', [ '', 'filter' ] ],
 					[ 'filterSource', '=', 'taxonomy' ],
 					[ 'filterTaxonomy', '!=', '' ],
 				],
@@ -1174,7 +1286,7 @@ class Filter_Element extends Element {
 				'label'    => esc_html__( 'Hide count', 'bricks' ),
 				'required' => [
 					[ 'filterQueryId', '!=', '' ],
-					[ 'filterAction', '!=', 'sort' ],
+					[ 'filterAction', '=', [ '', 'filter' ] ],
 					[ 'filterSource', '!=', '' ],
 				],
 			];
@@ -1184,7 +1296,7 @@ class Filter_Element extends Element {
 				'label'    => esc_html__( 'Hide empty', 'bricks' ),
 				'required' => [
 					[ 'filterQueryId', '!=', '' ],
-					[ 'filterAction', '!=', 'sort' ],
+					[ 'filterAction', '=', [ '', 'filter' ] ],
 					[ 'filterSource', '!=', '' ],
 				],
 			];
@@ -1197,7 +1309,7 @@ class Filter_Element extends Element {
 					'info'     => sprintf( esc_html( 'Style count via %s', 'bricks' ), '.brx-option-count' ),
 					'required' => [
 						[ 'filterQueryId', '!=', '' ],
-						[ 'filterAction', '!=', 'sort' ],
+						[ 'filterAction', '=', [ '', 'filter' ] ],
 						[ 'filterSource', '!=', '' ],
 					],
 				];
@@ -1208,7 +1320,7 @@ class Filter_Element extends Element {
 				'label'    => esc_html__( 'Hierarchical', 'bricks' ),
 				'required' => [
 					[ 'filterQueryId', '!=', '' ],
-					[ 'filterAction', '!=', 'sort' ],
+					[ 'filterAction', '=', [ '', 'filter' ] ],
 					[ 'filterSource', '=', 'taxonomy' ],
 				],
 			];
@@ -1220,7 +1332,7 @@ class Filter_Element extends Element {
 					'label'    => esc_html__( 'Auto toggle child terms', 'bricks' ),
 					'required' => [
 						[ 'filterQueryId', '!=', '' ],
-						[ 'filterAction', '!=', 'sort' ],
+						[ 'filterAction', '=', [ '', 'filter' ] ],
 						[ 'filterSource', '=', 'taxonomy' ],
 						[ 'filterHierarchical', '=', true ],
 					],
@@ -1237,7 +1349,7 @@ class Filter_Element extends Element {
 					'placeholder' => '—',
 					'required'    => [
 						[ 'filterQueryId', '!=', '' ],
-						[ 'filterAction', '!=', 'sort' ],
+						[ 'filterAction', '=', [ '', 'filter' ] ],
 						[ 'filterSource', '=', 'taxonomy' ],
 						[ 'filterHierarchical', '=', true ],
 						[ 'displayMode', '!=', 'button' ],
@@ -1254,7 +1366,7 @@ class Filter_Element extends Element {
 					'label'    => esc_html__( 'Indent', 'bricks' ) . ': ' . esc_html__( 'Gap', 'bricks' ),
 					'required' => [
 						[ 'filterQueryId', '!=', '' ],
-						[ 'filterAction', '!=', 'sort' ],
+						[ 'filterAction', '=', [ '', 'filter' ] ],
 						[ 'filterSource', '=', 'taxonomy' ],
 						[ 'filterHierarchical', '=', true ],
 						[ 'displayMode', '!=', 'button' ],
@@ -1321,7 +1433,7 @@ class Filter_Element extends Element {
 				'placeholder'    => 'IN',
 				'required'       => [
 					[ 'filterQueryId', '!=', '' ],
-					[ 'filterAction', '!=', 'sort' ],
+					[ 'filterAction', '=', [ '', 'filter' ] ],
 					[ 'filterSource', '=', 'customField' ],
 				],
 			];
@@ -1339,7 +1451,7 @@ class Filter_Element extends Element {
 					'placeholder' => 'OR',
 					'required'    => [
 						[ 'filterQueryId', '!=', '' ],
-						[ 'filterAction', '!=', 'sort' ],
+						[ 'filterAction', '=', [ '', 'filter' ] ],
 					],
 				];
 			}
@@ -1351,7 +1463,7 @@ class Filter_Element extends Element {
 					'label'    => esc_html__( 'Hide "All" option', 'bricks' ),
 					'required' => [
 						[ 'filterQueryId', '!=', '' ],
-						[ 'filterAction', '!=', 'sort' ],
+						[ 'filterAction', '=', [ '', 'filter' ] ],
 						[ 'filterSource', '!=', '' ],
 					],
 				];
@@ -1366,7 +1478,7 @@ class Filter_Element extends Element {
 					'label'    => esc_html__( 'Label', 'bricks' ) . ': ' . esc_html__( 'All', 'bricks' ),
 					'required' => [
 						[ 'filterQueryId', '!=', '' ],
-						[ 'filterAction', '!=', 'sort' ],
+						[ 'filterAction', '=', [ '', 'filter' ] ],
 						[ 'filterSource', '!=', '' ],
 						[ 'filterHideAllOption', '!=', true ], // Hide All option for radio (@since 1.11)
 					],
@@ -1384,8 +1496,8 @@ class Filter_Element extends Element {
 				'placeholder' => esc_html__( 'Value', 'bricks' ),
 				'required'    => [
 					[ 'filterQueryId', '!=', '' ],
-					[ 'filterAction', '!=', 'sort' ],
-					[ 'filterSource', '=', [ 'customField', 'wpField' ] ],
+					[ 'filterAction', '=', [ '', 'filter' ] ],
+					[ 'filterSource', '=', [ 'customField', 'wpField', 'wcField' ] ],
 				],
 			];
 
@@ -1411,8 +1523,8 @@ class Filter_Element extends Element {
 				],
 				'required'      => [
 					[ 'filterQueryId', '!=', '' ],
-					[ 'filterAction', '!=', 'sort' ],
-					[ 'filterSource', '=', [ 'customField', 'wpField' ] ],
+					[ 'filterAction', '=', [ '', 'filter' ] ],
+					[ 'filterSource', '=', [ 'customField', 'wpField', 'wcField' ] ],
 					[ 'labelMapping', '=', 'custom' ],
 				],
 			];
@@ -1425,7 +1537,7 @@ class Filter_Element extends Element {
 				'desc'     => esc_html__( 'Click to apply the latest filter settings. This ensures all filter options are up-to-date.', 'bricks' ),
 				'required' => [
 					[ 'filterQueryId', '!=', '' ],
-					[ 'filterAction', '!=', 'sort' ],
+					[ 'filterAction', '=', [ '', 'filter' ] ],
 				],
 			];
 		}
@@ -1457,7 +1569,6 @@ class Filter_Element extends Element {
 			}
 
 			// Each of the options add . (Post) / .term (Term) / .user (User) prefix
-
 			$controls['sortOptions'] = [
 				'type'          => 'repeater',
 				'label'         => esc_html__( 'Sort options', 'bricks' ),
@@ -1497,6 +1608,19 @@ class Filter_Element extends Element {
 					[ 'filterQueryId', '!=', '' ],
 					[ 'filterAction', '=', 'sort' ],
 				],
+			];
+
+			// per_page options (@since 1.12.2)
+			$controls['perPageOptions'] = [
+				'type'           => 'text',
+				'label'          => esc_html__( 'Options', 'bricks' ) . ': ' . esc_html__( 'Results per page', 'bricks' ),
+				'hasDynamicData' => false,
+				'placeholder'    => '10, 20, 50, 100',
+				'required'       => [
+					[ 'filterQueryId', '!=', '' ],
+					[ 'filterAction', '=', 'per_page' ],
+				],
+				'description'    => esc_html__( 'Comma-separated list of results per page options.', 'bricks' ),
 			];
 		}
 
@@ -1668,7 +1792,7 @@ class Filter_Element extends Element {
 			];
 		}
 
-		return $controls;
+		return apply_filters( 'bricks/filter_element/controls', $controls, $this );
 	}
 
 	/**
@@ -1696,5 +1820,22 @@ class Filter_Element extends Element {
 		}
 
 		return $option === $value;
+	}
+
+	public static function get_range_formatted_value( $value, $settings ) {
+		$mode           = isset( $settings['labelMode'] ) ? $settings['labelMode'] : 'range';
+		$separator      = $settings['labelThousandSeparator'] ?? false;
+		$decimal_places = isset( $settings['decimalPlaces'] ) ? (int) $settings['decimalPlaces'] : 0;
+		$thousands      = ! empty( $settings['labelThousandSeparator'] ) ? $settings['labelThousandSeparator'] : '';
+		$separator      = ! empty( $settings['labelSeparatorText'] ) ? bricks_render_dynamic_data( $settings['labelSeparatorText'] ) : ',';
+
+		// Add thousands separator (Only for range)
+		if ( $thousands && $mode === 'range' ) {
+			$fomatted_value = number_format( $value, $decimal_places, '.', $separator );
+		} else {
+			$fomatted_value = number_format( $value, $decimal_places, '.', '' );
+		}
+
+		return $fomatted_value;
 	}
 }

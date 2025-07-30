@@ -1,12 +1,16 @@
 <?php
 namespace Bricks\Integrations\Form;
 
+use Bricks\Helpers;
+
 if ( ! defined( 'ABSPATH' ) ) exit; // Exit if accessed directly
 
 class Init {
 	protected $uploaded_files;
 	protected $form_settings;
 	protected $form_fields;
+	protected $form_id;
+	protected $post_id;
 	protected $results;
 	protected static $submission_url_params = [];
 
@@ -38,6 +42,16 @@ class Init {
 		$loop_post_id    = isset( $submitted_data['loopId'] ) ? absint( $submitted_data['loopId'] ) : 0; // Get query loop post ID to parse dynamic data (@since 1.11.1)
 
 		$this->form_settings = \Bricks\Helpers::get_element_settings( $post_id, $form_element_id );
+		$this->form_id       = $form_element_id;
+		$this->post_id       = $post_id;
+
+		// No form settings found: Try to get from component element (@since 1.12.2)
+		if ( empty( $this->form_settings ) ) {
+			$component_element = \Bricks\Helpers::get_component_element_by_id( $form_element_id );
+			if ( ! empty( $component_element['settings'] ) ) {
+				$this->form_settings = $component_element['settings'];
+			}
+		}
 
 		// Return: No form action set
 		if ( empty( $this->form_settings['actions'] ) ) {
@@ -251,6 +265,40 @@ class Init {
 
 				$valid_ids[] = $field['id'];
 			}
+
+			// If field is Honeypot, ensure that value is not set (@since 1.12.2)
+			if ( isset( $field['isHoneypot'] ) ) {
+				$field_id = $field['id'] ?? '';
+
+				if ( isset( $this->form_fields[ "form-field-$field_id" ] ) && ! empty( $this->form_fields[ "form-field-$field_id" ] ) ) {
+
+					// Log the error
+					Helpers::maybe_log(
+						"[Honeypot] Possible spam submission:
+- Form Bricks Id: $form_element_id
+- Field ID: $field_id
+- Field Value: {$this->form_fields[ "form-field-$field_id" ]}
+"
+					);
+
+					// Set honeypot result
+					$honeypot_result = [
+						'type'    => 'error',
+						'message' => esc_html__( 'An error occurred, please try again later.', 'bricks' ),
+					];
+
+					// Allow users to customize the honeypot error message using filter
+					$honeypot_result = apply_filters( 'bricks/element/form/honeypot/result', $honeypot_result, $field_id, $this );
+
+					$this->set_result( $honeypot_result );
+
+					// Finish the form submission
+					$this->maybe_stop_processing(); // If error status is set...
+					$this->finish(); // else...
+
+					break;
+				}
+			}
 		}
 
 		/**
@@ -327,19 +375,34 @@ class Init {
 		$available_actions = self::get_available_actions();
 
 		foreach ( $this->form_settings['actions'] as $form_action ) {
-			if ( ! array_key_exists( $form_action, $available_actions ) ) {
+			// Skip if not a valid built-in action and no custom action handler exists (@since 1.12.2)
+			if ( ! array_key_exists( $form_action, $available_actions ) && ! has_action( "bricks/form/action/{$form_action}" ) ) {
 				continue;
 			}
 
 			$action_class = 'Bricks\Integrations\Form\Actions\\' . str_replace( ' ', '_', ucwords( str_replace( '-', ' ', $form_action ) ) );
 
-			$action = new $action_class( $form_action );
+			// If class exists, run the action
+			if ( class_exists( $action_class ) ) {
+				$action = new $action_class( $form_action );
 
-			if ( ! method_exists( $action_class, 'run' ) ) {
-				continue;
+				if ( ! method_exists( $action_class, 'run' ) ) {
+					continue;
+				}
+
+				$action->run( $this );
 			}
-
-			$action->run( $this );
+			// Handle custom actions registered via controls filter (@since 1.12.2)
+			else {
+				/**
+				 * Fire custom form action
+				 *
+				 * @param \Bricks\Integrations\Form\Init $form Current form instance
+				 *
+				 * @since 1.12.2
+				 */
+				do_action( "bricks/form/action/{$form_action}", $this );
+			}
 
 			// Halts execution if an action reported an error
 			$this->maybe_stop_processing();
@@ -452,6 +515,14 @@ class Init {
 
 	public function get_fields() {
 		return $this->form_fields;
+	}
+
+	public function get_id() {
+		return $this->form_id;
+	}
+
+	public function get_post_id() {
+		return $this->post_id;
 	}
 
 	public function get_uploaded_files() {
@@ -848,6 +919,7 @@ class Init {
 		$actions = [
 			'custom'         => esc_html__( 'Custom', 'bricks' ),
 			'email'          => esc_html__( 'Email', 'bricks' ),
+			'webhook'        => esc_html__( 'Webhook', 'bricks' ),
 			'redirect'       => esc_html__( 'Redirect', 'bricks' ),
 			'mailchimp'      => 'Mailchimp',
 			'sendgrid'       => 'SendGrid',
@@ -940,6 +1012,11 @@ class Init {
 
 			// Skip if field type is 'html' or 'hidden' (@since 1.12)
 			if ( in_array( $form_settings_field['type'], [ 'html', 'hidden' ], true ) ) {
+				continue;
+			}
+
+			// Skip if field is Honeypot (@since 1.12.2)
+			if ( isset( $form_settings_field['isHoneypot'] ) ) {
 				continue;
 			}
 

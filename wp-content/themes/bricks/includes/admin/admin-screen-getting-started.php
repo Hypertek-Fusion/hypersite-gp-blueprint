@@ -9,7 +9,10 @@ if ( ! defined( 'ABSPATH' ) ) exit; // Exit if accessed directly
 
 	<div class="bricks-admin-inner">
 		<h1 class="title">
-			<?php esc_html_e( 'Welcome to Bricks', 'bricks' ); ?>
+			<?php
+			// translators: %s is the name of the theme.
+			echo sprintf( esc_html__( 'Welcome to %s', 'bricks' ), 'Bricks' );
+			?>
 			<span class="badge" title="<?php esc_attr_e( 'Installed version', 'bricks' ); ?>"><?php echo BRICKS_VERSION; ?></span>
 		</h1>
 

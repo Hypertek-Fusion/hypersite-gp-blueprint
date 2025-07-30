@@ -43,14 +43,8 @@ class Element_Form extends Element {
 					// Load datepicker localisation
 					$l10n = $field['l10n'] ?? '';
 					if ( $l10n ) {
-						/**
-						 * Set "version" (4.6.13) to null
-						 *
-						 * If version is present, we get a 302 redirect
-						 *
-						 * @since 1.12
-						 */
-						wp_enqueue_script( 'bricks-flatpickr-l10n', "https://npmcdn.com/flatpickr@4.6.13/dist/l10n/$l10n.js", [ 'bricks-flatpickr' ], null );
+						// Hosted locally (@since 2.0)
+						wp_enqueue_script( 'bricks-flatpickr-l10n', BRICKS_URL_ASSETS . "js/libs/flatpickr-l10n/$l10n.min.js", [ 'bricks-flatpickr' ], null );
 					}
 				}
 			}
@@ -77,6 +71,11 @@ class Element_Form extends Element {
 		$this->control_groups['email'] = [
 			'title'    => esc_html__( 'Email', 'bricks' ),
 			'required' => [ 'actions', '=', 'email' ],
+		];
+
+		$this->control_groups['webhook'] = [
+			'title'    => esc_html__( 'Webhook', 'bricks' ),
+			'required' => [ 'actions', '=', 'webhook' ],
 		];
 
 		$this->control_groups['confirmation'] = [
@@ -275,6 +274,13 @@ class Element_Form extends Element {
 					'required' => [ 'type', '=', [ 'number' ] ],
 				],
 
+				'step'                       => [
+					'label'    => esc_html__( 'Step', 'bricks' ),
+					'type'     => 'number',
+					'min'      => 0,
+					'required' => [ 'type', '=', [ 'number' ] ],
+				],
+
 				'label'                      => [
 					'label' => esc_html__( 'Label', 'bricks' ),
 					'type'  => 'text',
@@ -290,14 +296,23 @@ class Element_Form extends Element {
 					'label'    => esc_html__( 'Value', 'bricks' ),
 					'type'     => 'text',
 					'info'     => esc_html__( 'Set the default field value/content.', 'bricks' ),
-					'required' => [ 'type', '!=', [ 'file', 'html' ] ],
+					'required' => [
+						[ 'type', '!=', [ 'file', 'html' ] ],
+						[ 'isHoneypot', '!=', true ], // Honeypot fields value should be empty by default (@since 1.12.2)
+					],
+				],
+
+				'minLength'                  => [
+					'label'    => esc_html__( 'Min. length', 'bricks' ),
+					'type'     => 'number',
+					'min'      => 0,
+					'required' => [ 'type', '=', [ 'email', 'number', 'text', 'tel', 'url', 'password', 'textarea' ] ],
 				],
 
 				'maxLength'                  => [
 					'label'    => esc_html__( 'Max. length', 'bricks' ),
 					'type'     => 'number',
 					'min'      => 0,
-					'info'     => esc_html__( 'Maximum characters allowed.', 'bricks' ),
 					'required' => [ 'type', '=', [ 'email', 'number', 'text', 'tel', 'url', 'password', 'textarea' ] ],
 				],
 
@@ -313,7 +328,10 @@ class Element_Form extends Element {
 				'datepickerInfo'             => [
 					'content'  => esc_html__( 'Use the date format as set under Settings > General > Date format', 'bricks' ) . " ($date_format)",
 					'type'     => 'info',
-					'required' => [ 'type', '=', 'datepicker' ],
+					'required' => [
+						[ 'type', '=', 'datepicker' ],
+						[ 'isHoneypot', '!=', true ], // For Honeypot we don't show value, so we also don't show the alert message (@since 1.12.2)
+					]
 				],
 
 				'name'                       => [
@@ -328,7 +346,10 @@ class Element_Form extends Element {
 					'label'    => esc_html__( 'Attribute', 'bricks' ) . ': ' . esc_html__( 'Autocomplete', 'bricks' ),
 					'type'     => 'text',
 					'info'     => 'on/off',
-					'required' => [ 'type', '=', [ 'text', 'textarea', 'email', 'number', 'password', 'tel', 'url' ] ],
+					'required' => [
+						[ 'type', '=', [ 'text', 'textarea', 'email', 'number', 'password', 'tel', 'url' ] ],
+						[ 'isHoneypot', '!=', true ] // Honeypot fields will have autocomplete set to "off" (@since 1.12.2)
+					],
 				],
 
 				// @since 1.9.9
@@ -532,11 +553,26 @@ class Element_Form extends Element {
 					'required'    => [ 'time', '!=', '' ],
 				],
 
+				// Honeypot (@since 1.12.2)
+				'isHoneypot'                 => [
+					'label'       => esc_html__( 'Honeypot', 'bricks' ),
+					'type'        => 'checkbox',
+					'required'    => [
+						'type',
+						'=',
+						[ 'email', 'text', 'textarea', 'tel', 'number', 'url', 'checkbox',  'select', 'radio', 'datepicker', 'password' ]
+					],
+					'description' => esc_html__( 'When enabled, this field acts as a spam trap. It will not be visible to users, but will capture any bots that fill it out.', 'bricks' ),
+				],
+
 				'required'                   => [
 					'label'    => esc_html__( 'Required', 'bricks' ),
 					'type'     => 'checkbox',
 					'inline'   => true,
-					'required' => [ 'type', '!=', [ 'hidden', 'html' ] ],
+					'required' => [
+						[ 'type', '!=', [ 'hidden', 'html' ] ],
+						[ 'isHoneypot', '!=', true ], // Honeypot fields can not be required (@since 1.12.2)
+					],
 				],
 
 				'options'                    => [
@@ -1151,6 +1187,99 @@ class Element_Form extends Element {
 			'default' => true,
 		];
 
+		// Group: Webhook (@since 2.0)
+		$this->controls['webhooks'] = [
+			'tab'           => 'content',
+			'group'         => 'webhook',
+			'type'          => 'repeater',
+			'label'         => esc_html__( 'Endpoints', 'bricks' ),
+			'placeholder'   => esc_html__( 'Endpoint', 'bricks' ),
+			'desc'          => esc_html__( 'The webhook endpoint(s) to send the submitted form data to.', 'bricks' ),
+			'titleProperty' => 'name',
+			'fields'        => [
+				'name'         => [
+					'label' => esc_html__( 'Name', 'bricks' ),
+					'type'  => 'text',
+				],
+				'url'          => [
+					'label'       => esc_html__( 'Endpoint URL', 'bricks' ),
+					'type'        => 'text',
+					'description' => esc_html__( 'The URL to send the form data to.', 'bricks' ),
+				],
+				'contentType'  => [
+					'label'       => esc_html__( 'Data format', 'bricks' ),
+					'type'        => 'select',
+					'options'     => [
+						'json'      => 'JSON',
+						'form-data' => esc_html__( 'Form data', 'bricks' ),
+					],
+					'default'     => 'json',
+					'placeholder' => 'JSON',
+					'description' => esc_html__( 'Format to send the data in.', 'bricks' ),
+				],
+				'dataTemplate' => [
+					'label'          => esc_html__( 'Data', 'bricks' ),
+					'type'           => 'code',
+					'hasDynamicData' => true,
+					'description'    => esc_html__( 'Customize how the data is structured. Leave empty to send all form fields.', 'bricks' ) . ' ' .
+								esc_html__( 'Example: {"name": "{{43f295}}", "email": "{{a5c626}}"}', 'bricks' ),
+				],
+				'headers'      => [
+					'label'          => esc_html__( 'Headers', 'bricks' ),
+					'type'           => 'code',
+					'hasDynamicData' => true,
+					'description'    => esc_html__( 'Add custom headers in JSON format. Leave empty for default headers.', 'bricks' ) . ' ' .
+								esc_html__( 'Example: {"Authorization": "Bearer token"}', 'bricks' ),
+				],
+			],
+		];
+
+		$this->controls['webhookMaxSize'] = [
+			'tab'         => 'content',
+			'group'       => 'webhook',
+			'label'       => esc_html__( 'Max payload size', 'bricks' ) . ' (KB)',
+			'type'        => 'number',
+			'placeholder' => '1024', // = Default: 1 MB
+			'min'         => 1,
+			'description' => esc_html__( 'Maximum size of the webhook payload in kilobytes.', 'bricks' ) . ' (' .
+								esc_html__( 'Default', 'bricks' ) . ': 1024)',
+		];
+
+		$this->controls['webhookRateLimit'] = [
+			'tab'         => 'content',
+			'group'       => 'webhook',
+			'label'       => esc_html__( 'Rate limiting', 'bricks' ),
+			'type'        => 'checkbox',
+			'description' => esc_html__( 'Limit the number of webhook requests that can be sent per hour.', 'bricks' ),
+		];
+
+		$this->controls['webhookRateLimitRequests'] = [
+			'tab'         => 'content',
+			'group'       => 'webhook',
+			'label'       => esc_html__( 'Max requests per hour', 'bricks' ),
+			'type'        => 'number',
+			'min'         => 1,
+			'placeholder' => '60',
+			'description' => esc_html__( 'Maximum number of webhook requests allowed per hour.', 'bricks' ) . ' (' . esc_html__( 'Default', 'bricks' ) . ': 60)',
+			'required'    => [ 'webhookRateLimit', '=', true ],
+		];
+
+		$this->controls['webhookErrorIgnore'] = [
+			'tab'         => 'content',
+			'group'       => 'webhook',
+			'label'       => esc_html__( 'Continue on error', 'bricks' ),
+			'type'        => 'checkbox',
+			'description' => esc_html__( 'If enabled, form submission will succeed even if the webhook fails. Errors will be logged to the server error log.', 'bricks' ),
+		];
+
+		$this->controls['webhookErrorMessage'] = [
+			'tab'      => 'content',
+			'group'    => 'webhook',
+			'label'    => esc_html__( 'Error message', 'bricks' ),
+			'type'     => 'text',
+			'required' => [ 'webhookErrorIgnore', '=', false ],
+		];
+
 		// Group: Confirmation email (@since 1.7.2)
 
 		$this->controls['confirmationEmailDescription'] = [
@@ -1567,6 +1696,18 @@ class Element_Form extends Element {
 			'description' => esc_html__( 'Log in user after successful registration. Tip: Set action "Redirect" to redirect user to the account/admin area.', 'bricks' ),
 		];
 
+		// Send WordPress notification (@since 1.12.2)
+		$this->controls['registrationWPNotification'] = [
+			'tab'         => 'content',
+			'group'       => 'registration',
+			'label'       => esc_html__( 'Send WordPress notification', 'bricks' ),
+			'type'        => 'checkbox',
+			'description' => sprintf(
+				esc_html__( 'Trigger "register_new_user" action to send WordPress notification. %s', 'bricks' ),
+				Helpers::article_link( 'form-element/#login-registration', esc_html__( 'Learn more', 'bricks' ) )
+			),
+		];
+
 		// Group: Lost password
 
 		$this->controls['lostPasswordEmailUsername'] = [
@@ -1715,6 +1856,13 @@ class Element_Form extends Element {
 			],
 			'placeholder' => esc_html__( 'Light', 'bricks' ),
 			'required'    => [ 'enableHCaptcha', '=', 'visible' ],
+		];
+
+		$this->controls['honeypotInfo'] = [
+			'tab'     => 'content',
+			'group'   => 'spam',
+			'content' => esc_html__( 'Honeypot: Create form field(s) and enable the "Honeypot" checkbox. Those honeypot fields aren\'t visible to users, but add an extra layer of protection against spam submissions.', 'bricks' ),
+			'type'    => 'info',
 		];
 
 		// Upload Button (remove "Text" control group)
@@ -1914,9 +2062,18 @@ class Element_Form extends Element {
 		$this->set_attribute( '_root', 'data-element-id', $this->id );
 
 		// Form inside loop: Store the loop object ID, so we can use it in the form submit logic (@since 1.11)
+
+		// NOTE: Will be 0, if we are in a popup AJAX call
 		$loop_id = Query::get_loop_object_id();
 		if ( $loop_id ) {
 			$this->set_attribute( '_root', 'data-loop-object-id', $loop_id );
+		}
+
+		// If it's REST call, and loop ID is not set (we are in popup), we try to set it to "post ID"
+		// This is needed for the form submit logic to work correctly (@since 2.0)
+		elseif ( bricks_is_rest_call() ) {
+			// If this is a REST call, we need to set the loop object ID to 0
+			$this->set_attribute( '_root', 'data-loop-object-id', get_the_ID() );
 		}
 
 		// Use form global element ID to store as form_id (@since 1.9.2)
@@ -1962,16 +2119,56 @@ class Element_Form extends Element {
 		// Append suffix for unique label HTML attributes inside a loop (@since 1.8)
 		$field_suffix = Query::is_any_looping() ? '-' . Query::is_any_looping() . '-' . Query::get_loop_index() : '';
 
+		// Generate unique ID for each field (@since 1.12.2)
+		// We need to generate them before main loop below, so we can use it for Honeypot style generation
+		$fields = array_map(
+			function( $field ) use ( $field_suffix ) {
+				$field['unique_id'] = Helpers::generate_random_id( false ) . $field_suffix;
+				return $field;
+			},
+			$fields
+		);
+
+		// Output inline honeypot styles above the form (@since 1.12.2)
+		$honeypot_css = $this->generate_honeypot_field_styles( $fields );
+		if ( ! empty( $honeypot_css ) ) {
+			echo '<style>' . $honeypot_css . '</style>';
+		}
+
 		foreach ( $fields as $index => $field ) {
 			// Field ID generated when rendering form repeater in builder panel
 			$field_id = isset( $field['id'] ) ? $field['id'] : '';
 
 			// Get a unique field ID to avoid conflicts when the form is inside a query loop or it was duplicated
-			$input_unique_id = Helpers::generate_random_id( false ) . $field_suffix;
+			// Generating outside this loop (@since 1.12.2)
+			$input_unique_id = $field['unique_id'];
 
 			// Field wrapper
 			if ( $field['type'] !== 'hidden' ) {
 				$this->set_attribute( "field-wrapper-$index", 'class', [ 'form-group', $field['type'] === 'file' ? 'file' : '' ] );
+			}
+
+			// Honeypot field: Set attributes (@since 1.12.2)
+			if ( isset( $field['isHoneypot'] ) ) {
+
+				// Set autocomplete attribute to "off" #86c368e99 (@since 2.0)
+				// Note: "nope" was used @pre 2.0, but was causing accessibility issues
+				$field['autocomplete'] = 'off';
+
+				// If the field is "select", we need to add "autocomplete" attribute even here
+				if ( $field['type'] === 'select' ) {
+					$this->set_attribute( "field-$index", 'autocomplete', $field['autocomplete'] );
+				}
+
+				// Set value to empty
+				$field['value'] = '';
+
+				// Remove "required" attribute
+				unset( $field['required'] );
+
+				// Set "tabindex" to -1 to prevent focus
+				$this->set_attribute( "field-$index", 'tabindex', '-1' );
+
 			}
 
 			// Field label
@@ -2063,6 +2260,13 @@ class Element_Form extends Element {
 				if ( isset( $field['max'] ) ) {
 					$this->set_attribute( "field-$index", 'max', $field['max'] );
 				}
+
+				// Set 'step' attribute value (@since 2.0)
+				$step = isset( $field['step'] ) ? $field['step'] : null;
+
+				if ( is_numeric( $step ) && $step > 0 ) {
+					$this->set_attribute( "field-$index", 'step', $step );
+				}
 			}
 
 			$this->set_attribute( "field-$index", 'id', "form-field-{$input_unique_id}" );
@@ -2148,13 +2352,19 @@ class Element_Form extends Element {
 				}
 			}
 
-			// Max. length support (same as placeholder, without datepicker)
-			$max_length_support = array_diff( $placeholder_support, [ 'datepicker' ] );
+			// Min/max. length support (same as placeholder, without datepicker)
+			$min_max_length_support = array_diff( $placeholder_support, [ 'datepicker' ] );
 
-			if ( in_array( $field['type'], $max_length_support ) ) {
+			if ( in_array( $field['type'], $min_max_length_support ) ) {
+				$min_length = $field['minLength'] ?? false;
 				$max_length = $field['maxLength'] ?? false;
 
-				// Ensure max_length is an positive integer
+				// Ensure min_length is a positive integer
+				if ( ! is_numeric( $min_length ) || $min_length < 0 ) {
+					$min_length = false;
+				}
+
+				// Ensure max_length is a positive integer
 				if ( ! is_numeric( $max_length ) || $max_length < 0 ) {
 					$max_length = false;
 				}
@@ -2166,6 +2376,11 @@ class Element_Form extends Element {
 
 				if ( $max_length !== false ) {
 					$this->set_attribute( "field-$index", 'maxlength', $max_length );
+				}
+
+				// @since 2.0
+				if ( $min_length !== false ) {
+					$this->set_attribute( "field-$index", 'minlength', $min_length );
 				}
 			}
 
@@ -2214,8 +2429,8 @@ class Element_Form extends Element {
 			foreach ( $fields as $index => $field ) {
 				$field_value = isset( $field['value'] ) ? $this->render_dynamic_data( $field['value'] ) : ''; // @since 1.9.3
 
-				// Generate new unique ID for each field. Used for checkbox and radio fields (@since 1.12)
-				$checkbox_radio_unique_id = Helpers::generate_random_id( false ) . $field_suffix;
+				// Using field's unique_id (@since 1.12.2)
+				$checkbox_radio_unique_id = $field['unique_id'];
 
 				// Set the role and aria-labelledby attributes for the options wrapper (@since 1.9.6)
 				$this->set_attribute( "field-wrapper-$index", 'role', $field['type'] === 'radio' ? 'radiogroup' : 'group' );
@@ -2227,7 +2442,7 @@ class Element_Form extends Element {
 				 * @since 1.9.9: Only needed for checkbox and radio as the label is a <div> element.
 				 * @since 1.12: Changed label to unique ID
 				 */
-				if ( $field['type'] === 'checkbox' || $field['type'] === 'radio' ) {
+				if ( ( $field['type'] === 'checkbox' || $field['type'] === 'radio' ) && ! empty( $field['label'] ) ) {
 					$this->set_attribute( "field-wrapper-$index", 'aria-labelledby', "label-{$checkbox_radio_unique_id}" );
 				}
 				?>
@@ -2269,7 +2484,7 @@ class Element_Form extends Element {
 				}
 
 				if ( in_array( $field['type'], $input_types, true ) ) {
-					if ( ! empty( $field['passwordToggle'] ) ) { // @since 1.12
+					if ( $field['type'] === 'password' && ! empty( $field['passwordToggle'] ) ) { // @since 1.12
 						echo '<div class="password-input-wrapper">';
 					}
 
@@ -2391,6 +2606,11 @@ class Element_Form extends Element {
 							<?php
 							if ( isset( $field['required'] ) ) {
 								echo esc_attr( 'required ' );
+							}
+
+							// Is "Honeypot" field: Add "tabindex" to -1 to prevent focus (@since 1.12.2)
+							if ( isset( $field['isHoneypot'] ) ) {
+								echo 'tabindex="-1"';
 							}
 
 							if ( $field['type'] === 'checkbox' && is_array( $checked_values ) && in_array( $field_key, $checked_values, true ) ) {
@@ -2620,5 +2840,72 @@ class Element_Form extends Element {
 		$this->set_attribute( 'turnstile', 'data-sitekey', Database::$global_settings['apiKeyTurnstile'] );
 
 		return "<div {$this->render_attributes( 'turnstile' )}></div>";
+	}
+
+	/**
+	 * Generate CSS styles for honeypot fields
+	 *
+	 * @param array $fields The form fields
+	 *
+	 * @since 1.12.2
+	 */
+	public function generate_honeypot_field_styles( $fields ) {
+		$honeypot_selectors = [];
+		$css                = '';
+
+		foreach ( $fields as $index => $field ) {
+			// Target only honeypot fields
+			if ( ! isset( $field['isHoneypot'] ) ) {
+				continue;
+			}
+
+			// If type is "select", we need to target the select element
+			if ( $field['type'] === 'select' ) {
+				$honeypot_selectors[] = "select#form-field-{$field['unique_id']}";
+			}
+
+			// If type is "textarea", we need to target the textarea element
+			elseif ( $field['type'] === 'textarea' ) {
+				$honeypot_selectors[] = "textarea#form-field-{$field['unique_id']}";
+			}
+
+			// If type is "checkbox" or "radio" we need to check if ID *starts* with the unique ID
+			elseif ( $field['type'] === 'checkbox' || $field['type'] === 'radio' ) {
+				$honeypot_selectors[] = "input[id^='form-field-{$field['unique_id']}']";
+			}
+
+			// Default: Target input fields
+			else {
+				$honeypot_selectors[] = "input#form-field-{$field['unique_id']}";
+			}
+		}
+
+		// If we have honeypot fields, generate CSS
+		if ( ! empty( $honeypot_selectors ) ) {
+			$css = 'div.form-group:has(' . implode( ',', $honeypot_selectors ) . ')';
+
+			// Set defined CSS rules
+			$css_properties = [
+				'opacity'  => '0 !important',
+				'position' => 'absolute !important',
+				'top'      => '-9999px !important',
+				'left'     => '-9999px !important',
+				'height'   => '0 !important',
+				'width'    => '0 !important',
+				'z-index'  => '-1 !important',
+				'padding'  => '0 !important',
+			];
+
+			$css .= '{' . implode(
+				';',
+				array_map(
+					fn( $key, $value) => "$key: $value",
+					array_keys( $css_properties ),
+					$css_properties
+				)
+			) . '}';
+		}
+
+		return $css;
 	}
 }

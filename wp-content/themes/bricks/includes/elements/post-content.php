@@ -77,11 +77,16 @@ class Element_Post_Content extends Element {
 			$bricks_data = get_post_meta( $this->post_id, BRICKS_DB_PAGE_CONTENT, true );
 
 			if ( empty( $bricks_data ) || ! is_array( $bricks_data ) ) {
-				return $this->render_element_placeholder(
-					[
-						'title' => esc_html__( 'No Bricks data found.', 'bricks' ),
-					]
-				);
+				$placeholder_data = [
+					'title' => esc_html__( 'No Bricks data found.', 'bricks' ),
+				];
+
+				// Add custom class if source is Bricks (for StaticArea.vue to find the placeholder) (@since 1.12.2)
+				if ( $data_source === 'bricks' ) {
+					$placeholder_data['class'] = 'brx-post-content-placeholder';
+				}
+
+				return $this->render_element_placeholder( $placeholder_data );
 			}
 
 			// Avoid infinite loop
@@ -98,8 +103,9 @@ class Element_Post_Content extends Element {
 				// Reset the main render_data self::$elements
 				Frontend::$elements = $store_elements;
 
-				// Add elements & global classes CSS inlince in the builder or frontend (with Query Loop + External Files)
-				if ( bricks_is_builder() || bricks_is_builder_call() || ( Query::is_looping() && Database::get_setting( 'cssLoading' ) === 'file' ) ) {
+				// Add elements & global classes CSS inline in the builder or frontend (with Query Loop + External Files)
+				// Don't add global classes CSS when rendering static area e.g. show outer post content (@since 1.12.3)
+				if ( ! isset( $_POST['staticArea'] ) && ( bricks_is_builder() || bricks_is_builder_call() || ( Query::is_looping() && Database::get_setting( 'cssLoading' ) === 'file' ) ) ) {
 					Assets::$inline_css['content'] = '';
 
 					// Clear the list of elements already styled

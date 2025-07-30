@@ -26,8 +26,8 @@ class Save_Submission extends Base {
 			$form_id = sanitize_text_field( $submitted_data['globalId'] );
 		}
 
-		// Return: post ID or form ID are not valid
-		if ( ! $post_id || ! $form_id ) {
+		// Return: form ID are not valid, post_id could be 0 if the form located in CPT archive, 404, search, etc. (@since 1.12.2)
+		if ( ! $form_id ) {
 			$form->set_result(
 				[
 					'action'  => $this->name,
@@ -50,6 +50,11 @@ class Save_Submission extends Base {
 
 			// Skip: Form field type 'html'
 			if ( $field_type === 'html' ) {
+				continue;
+			}
+
+			// Skip: Fields that are defined as honeypot (@since 1.12.2)
+			if ( isset( $field['isHoneypot'] ) ) {
 				continue;
 			}
 

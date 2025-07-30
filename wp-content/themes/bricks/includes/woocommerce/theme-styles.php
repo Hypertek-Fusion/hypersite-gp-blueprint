@@ -14,11 +14,13 @@ class Woocommerce_Theme_Styles {
 	 */
 	public function set_groups( $control_groups ) {
 		$control_groups['woocommerce-button'] = [
-			'title' => 'WooCommerce - ' . esc_html__( 'Button', 'bricks' ),
+			'title'  => 'WooCommerce - ' . esc_html__( 'Button', 'bricks' ),
+			'parent' => 'elements', // @since 2.0
 		];
 
 		$control_groups['woocommerce-notice'] = [
-			'title' => 'WooCommerce - ' . esc_html__( 'Notice', 'bricks' ),
+			'title'  => 'WooCommerce - ' . esc_html__( 'Notice', 'bricks' ),
+			'parent' => 'elements', // @since 2.0
 		];
 
 		return $control_groups;

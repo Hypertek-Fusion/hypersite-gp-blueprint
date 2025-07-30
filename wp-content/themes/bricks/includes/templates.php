@@ -17,6 +17,8 @@ class Templates {
 
 		// Run on 'wp' and priority 20 to ensure set_active_templates && set_page_data in database.php ran first (@since 1.9.2)
 		add_action( 'wp', [ $this, 'assign_templates_to_hooks' ], 20 );
+		// 'wp' is not run in custom API endpoints, follow database.php 'rest_api_init' as well (@since 2.0)
+		add_action( 'rest_api_init', [ $this, 'assign_templates_to_hooks' ], 20 );
 
 		add_shortcode( 'bricks_template', [ $this, 'render_shortcode' ] );
 
@@ -143,6 +145,11 @@ class Templates {
 			return;
 		}
 
+		// Ensure template post_status is 'publish' (@since 2.0)
+		if ( get_post_status( $template_id ) !== 'publish' ) {
+			return;
+		}
+
 		$original_post_id = ! empty( Database::$page_data['original_post_id'] ) ? Database::$page_data['original_post_id'] : '';
 
 		// post_id at this stage could be template preview post ID (populated content)
@@ -222,6 +229,17 @@ class Templates {
 
 		// STEP: Builder (append template CSS as inline <style> to element HTML)
 		if ( bricks_is_builder() || bricks_is_builder_call() ) {
+			// Collect css and elements related to this template for component rendering builder call (@since 2.0)
+			if ( ! isset( Builder::$templates_data[ $template_id ] ) ) {
+				Builder::$templates_data[ $template_id ] = [
+					'css'      => '',
+					'elements' => []
+				];
+			}
+
+			Builder::$templates_data[ $template_id ]['css']      = $template_inline_css;
+			Builder::$templates_data[ $template_id ]['elements'] = $elements;
+
 			// Use 'data-template-id' to get template ID in builder to generate global classes CSS of Template element (@since 1.8.2)
 			$template_inline_css .= Assets::$inline_css_dynamic_data;
 			$html                .= "<style data-template-id=\"{$template_id}\" id=\"bricks-inline-css-template-{$template_id}\">{$template_inline_css}</style>";
@@ -620,9 +638,107 @@ class Templates {
 			'fields'     => 'ids',
 		];
 
+		// Infobox query arguments
+		$q_infobox = [
+			[
+				'key'     => BRICKS_DB_TEMPLATE_TYPE,
+				'value'   => 'popup',
+				'compare' => '=',
+			],
+			[
+				'key'     => BRICKS_DB_TEMPLATE_SETTINGS,
+				'value'   => 's:14:"popupIsInfoBox";b:1;',
+				'compare' => 'LIKE',
+			],
+		];
+
+		// Popup query arguments
+		$q_popup = [
+			[
+				'key'     => BRICKS_DB_TEMPLATE_TYPE,
+				'value'   => 'popup',
+				'compare' => '=',
+			],
+			[
+				'relation' => 'OR',
+				[
+					'key'     => BRICKS_DB_TEMPLATE_SETTINGS,
+					'value'   => 's:14:"popupIsInfoBox";b:1;',
+					'compare' => 'NOT LIKE',
+				],
+				[
+					'key'     => BRICKS_DB_TEMPLATE_SETTINGS,
+					'compare' => 'NOT EXISTS',
+				],
+			],
+		];
+
+		// Handle specific template types infobox and popup (string)
+		if ( is_string( $template_type ) ) {
+			if ( $template_type === 'infobox' ) {
+				$query_args = [
+					'meta_query'    => $q_infobox,
+					'fields'        => 'ids',
+					'no_found_rows' => true,
+				];
+			} elseif ( $template_type === 'popup' ) {
+				$query_args = [
+					'meta_query'    => $q_popup,
+					'fields'        => 'ids',
+					'no_found_rows' => true,
+				];
+			}
+		}
+
+		// Handle array of template types (includes/elements/template.php)
+		if ( is_array( $template_type ) ) {
+			$contains_infobox = in_array( 'infobox', $template_type );
+			$contains_popup   = in_array( 'popup', $template_type );
+
+			// Amend meta query if 'infobox' or 'popup' is in the array, but not both
+			if ( ( $contains_infobox || $contains_popup ) && ! ( $contains_infobox && $contains_popup ) ) {
+				// Remove 'infobox' and 'popup' from array
+				$template_type = array_diff( $template_type, [ 'popup', 'infobox' ] );
+
+				$query_args = [
+					'meta_query'    => [
+						'relation' => 'OR',
+					],
+					'fields'        => 'ids',
+					'no_found_rows' => true,
+				];
+
+				// Add remaining template types to the query
+				if ( count( $template_type ) > 0 ) {
+					$query_args['meta_query'][] = [
+						'key'     => BRICKS_DB_TEMPLATE_TYPE,
+						'value'   => $template_type,
+						'compare' => 'IN',
+					];
+				}
+
+				// Add popup query if 'popup' is in the array
+				if ( $contains_popup ) {
+					$query_args['meta_query'][] = $q_popup;
+				}
+
+				// Add infobox query if 'infobox' is in the array
+				if ( $contains_infobox ) {
+					$query_args['meta_query'][] = $q_infobox;
+				}
+			}
+		}
+
+		// Execute the query
 		$query = self::get_templates_query( $query_args );
 
-		return ! empty( $query->found_posts ) ? $query->posts : [];
+		// Return results for normal queries
+		if ( empty( $query_args['no_found_rows'] ) ) {
+			return ! empty( $query->found_posts ) ? $query->posts : [];
+		}
+
+		// Return results based on 'no_found_rows' flag
+		return $query->posts;
 	}
 
 	/**
@@ -631,6 +747,18 @@ class Templates {
 	 * @since 1.0
 	 */
 	public static function get_templates( $custom_args = [] ) {
+		// Get excluded templates setting (@since 1.12.2)
+		$excluded_templates = Database::get_setting( 'excludedTemplates', [] );
+
+		// If this is a remote request, modify the query to exclude templates (@since 1.12.2)
+		if ( ! empty( $custom_args['remote_request'] ) && ! empty( $excluded_templates ) ) {
+			if ( ! isset( $custom_args['post__not_in'] ) ) {
+				$custom_args['post__not_in'] = [];
+			}
+
+			$custom_args['post__not_in'] = array_merge( $custom_args['post__not_in'], $excluded_templates );
+		}
+
 		$templates_query = self::get_templates_query( $custom_args );
 
 		$templates = [];
@@ -938,7 +1066,7 @@ class Templates {
 	public function create_template() {
 		Ajax::verify_request( 'bricks-nonce-builder' );
 
-		if ( ! Capabilities::current_user_has_full_access() ) {
+		if ( ! Builder_Permissions::user_has_permission( 'create_templates' ) ) {
 			wp_send_json_error( 'verify_request: Sorry, you are not allowed to perform this action.' );
 		}
 
@@ -974,7 +1102,7 @@ class Templates {
 			);
 
 			// STEP: Handle password protection template population
-			if ( $template_data['templateType'] === 'password_protection' && Capabilities::current_user_has_full_access() ) {
+			if ( $template_data['templateType'] === 'password_protection' ) {
 				Password_Protection::populate_template( $template_id );
 			}
 		}
@@ -1068,7 +1196,7 @@ class Templates {
 	public function delete_template() {
 		Ajax::verify_request( 'bricks-nonce-builder' );
 
-		if ( ! Capabilities::current_user_has_full_access() ) {
+		if ( ! Builder_Permissions::user_has_permission( 'delete_templates' ) ) {
 			wp_send_json_error( 'verify_request: Sorry, you are not allowed to perform this action.' );
 		}
 
@@ -1106,7 +1234,7 @@ class Templates {
 			Ajax::verify_nonce( 'bricks-nonce-admin' );
 		}
 
-		if ( ! Capabilities::current_user_has_full_access() ) {
+		if ( ! Builder_Permissions::user_has_permission( 'import_export_templates' ) ) {
 			wp_send_json_error( 'verify_request: Sorry, you are not allowed to perform this action.' );
 		}
 
@@ -1333,10 +1461,36 @@ class Templates {
 			// Add back slashes to element settings (needed for '_content' HTML entities, and Custom CSS)
 			foreach ( $elements as $index => $element ) {
 				$element_settings = ! empty( $element['settings'] ) ? $element['settings'] : [];
+				$element_name     = ! empty( $element['name'] ) ? $element['name'] : '';
 
-				// STEP: Import element images & update template data with local image data (@since 1.10.2)
-				if ( count( $element_settings ) && $import_images ) {
-					self::import_images( $element_settings, $import_images );
+				// STEP: Import element images & update template data with local image data. (@since 1.10.2) Should run even if importImages is untick (@since 1.12.2)
+				if ( count( $element_settings ) ) {
+
+					// Handle image-gallery element (@since 1.12.2)
+					if ( $element_name === 'image-gallery' ) {
+						// The images are stored in the 'images' setting key
+						$images = $element_settings['items']['images'] ?? [];
+						$size   = $element_settings['items']['size'] ?? 'full';
+
+						if ( count( $images ) ) {
+							foreach ( $images as $image_index => $image ) {
+								// import_image requires size to be set
+								$image['size'] = $size;
+
+								$new_image = self::import_image( $image, $import_images );
+
+								if ( is_array( $new_image ) && ! isset( $new_image['error'] ) ) {
+									// Directly update the image in the element settings as str_replace doesn't work here
+									$elements[ $index ]['settings']['items']['images'][ $image_index ] = $new_image;
+								}
+							}
+						}
+					}
+
+					// Handle Image and SVG element (single image) (@since 1.12.2)
+					else {
+						self::import_images( $element_settings, $import_images );
+					}
 				}
 
 				foreach ( $element_settings as $setting_key => $setting_value ) {
@@ -1498,7 +1652,7 @@ class Templates {
 			$template_id = isset( $_GET['templateId'] ) ? intval( $_GET['templateId'] ) : 0;
 		}
 
-		if ( ! Capabilities::current_user_has_full_access() ) {
+		if ( isset( $_GET['builder'] ) && ! Builder_Permissions::user_has_permission( 'import_export_templates' ) ) {
 			wp_send_json_error( 'verify_request: Sorry, you are not allowed to perform this action.' );
 		}
 
@@ -1561,6 +1715,8 @@ class Templates {
 		}
 
 		if ( count( $global_classes_to_add ) ) {
+			// Add category metadata before adding to template data (@since 1.12.2)
+			$global_classes_to_add           = Helpers::add_category_metadata_to_classes( $global_classes_to_add );
 			$template_data['global_classes'] = $global_classes_to_add;
 		}
 
@@ -1591,7 +1747,7 @@ class Templates {
 		// Final file name
 		$file_name = 'template-' . $file_name . '-' . date( 'Y-m-d' ) . '.json';
 
-		if ( bricks_is_builder_call() ) {
+		if ( bricks_is_ajax_call() ) {
 			// Download individual template
 			header( 'Content-Type:application/json; charset=utf-8' );
 			header( "Content-Disposition: attachment; filename=$file_name" );
@@ -1655,12 +1811,18 @@ class Templates {
 		$is_svg = pathinfo( $image['url'], PATHINFO_EXTENSION ) === 'svg';
 
 		// STEP: No image import requested: Return placeholder image
-		if ( ! $import_images && ! $is_svg ) {
+		if ( ! $import_images ) {
 			// Add to instance property to replace templateData before returning it to Vue
 			$placeholder_image = [
-				'url'  => Builder::get_template_placeholder_image(),
-				'full' => Builder::get_template_placeholder_image(),
+				'url'           => Builder::get_template_placeholder_image( $is_svg ),
+				'full'          => Builder::get_template_placeholder_image( $is_svg ),
+				'isPlaceholder' => true,
 			];
+
+			// Add placeholder image path. For SVG elements (@since 1.12.2)
+			if ( $is_svg ) {
+				$placeholder_image['path'] = Builder::get_template_placeholder_image( $is_svg, 'path' );
+			}
 
 			self::$template_images[] = [
 				'old' => $image,
@@ -1672,12 +1834,12 @@ class Templates {
 
 		// Not allowed to upload SVG: Remove 'file' value
 		elseif ( $import_images && $is_svg && ! Capabilities::current_user_can_upload_svg() && ! empty( $image['url'] ) ) {
-			$svg_blank = $image;
-			unset( $svg_blank['url'] );
-
-			if ( isset( $svg_blank['filename'] ) ) {
-				unset( $svg_blank['filename'] );
-			}
+			// Use placeholder SVG image instead. (@since 1.12.2)
+			$svg_blank = [
+				'url'  => Builder::get_template_placeholder_image( true ),
+				'full' => Builder::get_template_placeholder_image( true ),
+				'path' => Builder::get_template_placeholder_image( true, 'path' ),
+			];
 
 			self::$template_images[] = [
 				'old' => $image,
@@ -1791,7 +1953,7 @@ class Templates {
 	public function convert_template() {
 		Ajax::verify_nonce( 'bricks-nonce-builder' );
 
-		if ( ! Capabilities::current_user_has_full_access() ) {
+		if ( ! Builder_Permissions::user_has_permission( 'edit_templates' ) && ! Builder_Permissions::user_has_permission( 'insert_templates' ) ) {
 			wp_send_json_error( 'verify_request: Sorry, you are not allowed to perform this action.' );
 		}
 
@@ -1953,27 +2115,18 @@ class Templates {
 			return;
 		}
 
-		// STEP: Get all section templates
-		$section_templates = self::get_templates_query(
-			[
-				'meta_query' => [
-					[
-						'key'     => BRICKS_DB_TEMPLATE_TYPE,
-						'value'   => 'section',
-						'compare' => '=',
-					],
-				],
-			]
-		);
+		// Get all available templates once in case Database::set_active_templates not triggered (#86c417v88)
+		$all_templates = Database::get_all_templates_by_type();
+		// STEP: Get all section templates - improve performance (@since 2.0)
+		$section_templates = $all_templates['section'] ?? [];
 
 		// Return: No section templates found
-		if ( ! $section_templates->have_posts() ) {
+		if ( empty( $section_templates ) ) {
 			return;
 		}
 
 		// STEP: Loop over all section templates with 'Assign to hook' setting
-		foreach ( $section_templates->posts as $section_template ) {
-			$template_id       = $section_template->ID;
+		foreach ( $section_templates as $template_id ) {
 			$template_settings = Helpers::get_template_settings( $template_id );
 
 			// Skip: Previewing the template itself
