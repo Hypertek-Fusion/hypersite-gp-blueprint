@@ -289,10 +289,12 @@ const bricksUtils = {
 		 * 1. Reload all items
 		 * 2. Recalculate and update the layout (@since 1.10)
 		 * 3. Arrange items according to current sorting/filtering
+		 * 4. Update isotope on image load (#86c44c5a0; @since 2.0)
 		 */
 		isotopeInstance.instance?.reloadItems()
 		isotopeInstance.instance?.layout()
 		isotopeInstance.instance?.arrange()
+		bricksUtils.updateIsotopeOnImageLoad(elementId)
 	},
 
 	/**
@@ -316,47 +318,95 @@ const bricksUtils = {
 		/**
 		 * Handle native browser loading="lazy" attribute
 		 *
-		 * Ensure layout updates after every 20% progress and once done.
-		 *
-		 * @since 1.9.9
+		 * @since 2.0: Only track images that are not loaded yet.
+		 * Otherwise the more images added to the instance.element,
+		 * the bigger the trigger and visitor might see many unstyle images (Infinite Scroll).
 		 */
-		const allImages = isotopeInstance.instance.element.querySelectorAll('img')
+		const unloadedImages = Array.from(
+			isotopeInstance.instance.element.querySelectorAll('img')
+		).filter((img) => {
+			return !img.complete || img.naturalHeight === 0
+		})
 
-		if (allImages.length) {
-			let totalImages = allImages.length
-			let loadedImages = 0
-			let triggerAtPercent = 20
-			let triggerEveryPercent = 20
+		if (unloadedImages.length === 0) {
+			// Trigger once if no images to load
+			isotopeInstance.instance.layout()
+			return
+		}
 
-			const updateNow = () => {
-				const percentComplete = Math.round((loadedImages / totalImages) * 100)
-				if (percentComplete >= triggerAtPercent) {
+		let loadedCount = 0
+		let layoutScheduled = false
+
+		/**
+		 * Schedule layout update using requestAnimationFrame
+		 * Without requestAnimationFrame, multiple images loading simultaneously could trigger excessive layout calculations, causing janky animations and poor performance.
+		 * @since 2.0
+		 */
+		const scheduleLayout = () => {
+			if (!layoutScheduled) {
+				layoutScheduled = true
+				requestAnimationFrame(() => {
 					isotopeInstance.instance.layout()
-					// 40%, 60%, 80%, 100%
-					triggerAtPercent += triggerEveryPercent
+					layoutScheduled = false
+				})
+			}
+		}
+
+		/**
+		 * Calculate N images to wait for before forcing an update
+		 * To prevents layout instability while balancing performance vs responsiveness.
+		 *
+		 * Formula breakdown:
+		 * - Divide total unloaded images by 5 (aiming for ~20% intervals)
+		 * - Round up to ensure we get a whole number (Math.ceil)
+		 * - Ensure minimum of 1 image (never wait for 0 images)
+		 * - Cap maximum at 3 images (prevent waiting too long for large galleries)
+		 *
+		 * Examples:
+		 * - 2 images  → forceUpdateEvery = 1  (50% intervals)
+		 * - 10 images → forceUpdateEvery = 2 (20% intervals)
+		 * - > 10 images → forceUpdateEvery = 3 (12% intervals, capped)
+		 *
+		 */
+		const forceUpdateEvery = Math.min(3, Math.max(1, Math.ceil(unloadedImages.length / 5)))
+		const maxWaitTime = 500 // 500ms
+		let lastForceUpdate = Date.now()
+
+		unloadedImages.forEach((img) => {
+			// Force update every N images, or every 500ms, or on last image load
+			const handleImageLoad = () => {
+				loadedCount++
+				const now = Date.now()
+
+				// Force update conditions
+				const shouldForceUpdate =
+					loadedCount % forceUpdateEvery === 0 || // Every N images
+					now - lastForceUpdate > maxWaitTime || // Or every 500ms
+					loadedCount === unloadedImages.length // Or last image
+
+				if (shouldForceUpdate) {
+					// Immediate update
+					isotopeInstance.instance.layout()
+					lastForceUpdate = now
+				} else {
+					// Batched update
+					scheduleLayout()
 				}
+
+				// Cleanup event listeners
+				img.removeEventListener('load', handleImageLoad)
+				img.removeEventListener('error', handleImageLoad)
 			}
 
-			allImages.forEach((img) => {
-				if (img.complete && img.naturalHeight !== 0) {
-					// Image already loaded or served from cache
-					loadedImages++
-					updateNow()
-				} else {
-					img.addEventListener('load', () => {
-						// Image loaded
-						loadedImages++
-						updateNow()
-					})
-
-					img.addEventListener('error', () => {
-						// Image failed to load (e.g. 404 error), causing the final count to be incorrect
-						loadedImages++
-						updateNow()
-					})
-				}
-			})
-		}
+			if (img.complete && img.naturalHeight !== 0) {
+				// This still needed even if unloadedImages is filtered, because the image might be loaded before reaching this point)
+				loadedCount++
+				scheduleLayout()
+			} else {
+				img.addEventListener('load', handleImageLoad)
+				img.addEventListener('error', handleImageLoad)
+			}
+		})
 	},
 
 	/**
@@ -428,6 +478,7 @@ const bricksUtils = {
 		}
 
 		// STEP: Toggle class OR other attribute
+		let toggleElementCurrentState = 'off' // @since 2.0
 		if (toggleAttribute === 'class') {
 			// Close .brx-open after 200ms to prevent mobile menu styles from unsetting while mobile menu fades out
 			if (
@@ -435,18 +486,27 @@ const bricksUtils = {
 				toggleValue === 'brx-open' &&
 				toggleElement.classList.contains('brx-open')
 			) {
+				toggleElementCurrentState = 'on'
 				toggleElement.classList.add('brx-closing')
 				setTimeout(() => {
 					toggleElement.classList.remove('brx-closing')
 					toggleElement.classList.remove('brx-open')
 				}, 200)
 			} else {
+				// Check the current state of the toggle element
+				if (toggleElement.classList.contains(toggleValue)) {
+					toggleElementCurrentState = 'on'
+				} else {
+					toggleElementCurrentState = 'off'
+				}
 				toggleElement.classList.toggle(toggleValue)
 			}
 		} else {
 			if (toggleElement.getAttribute(toggleAttribute)) {
+				toggleElementCurrentState = 'on'
 				toggleElement.removeAttribute(toggleAttribute)
 			} else {
+				toggleElementCurrentState = 'off'
 				toggleElement.setAttribute(toggleAttribute, toggleValue)
 			}
 		}
@@ -456,9 +516,16 @@ const bricksUtils = {
 		// Check for Offcanvas element disableAutoFocus attribute (@since 1.10.2)
 		if (toggleElement.classList.contains('brxe-offcanvas')) {
 			disableAutoFocus = toggleElement.dataset?.noAutoFocus === 'true' || false
+			toggleElement.classList.remove('brx-closing') // We can remove the closing class here (@since 2.0)
 		}
 
-		if (!disableAutoFocus) {
+		// Nestable nav: disable auto focus as there is another logic in bricksNavNested(), or it will be flickering
+		if (toggleElement.classList.contains('brxe-nav-nested')) {
+			disableAutoFocus = true
+		}
+
+		// Only auto focus if the target toggle is going to be opened (@since 2.0)
+		if (!disableAutoFocus && toggleElementCurrentState === 'off') {
 			bricksFocusOnFirstFocusableElement(toggleElement)
 		}
 	},
@@ -664,6 +731,84 @@ const bricksUtils = {
 
 						stats.innerHTML = statsText
 					}
+				}
+			})
+		}
+	},
+
+	/**
+	 * Use by Bricks Interaction to toggle infoBox on Google Map
+	 * @since 2.0
+	 */
+	toggleMapInfoBox: (config) => {
+		// Ensure google is loaded
+		if (!window.google || !window.google.maps) return
+
+		const { el: sourceEl, action } = config
+		if (!sourceEl) return
+
+		const addressId = sourceEl.dataset?.brxInfoboxOpen || false
+		const mapId = sourceEl.dataset?.brxInfoboxMapId || false
+
+		if (!addressId || !mapId) return
+
+		const googleMapInstance = window.bricksData.googleMapInstances[mapId]
+		if (!googleMapInstance) return
+
+		const location = googleMapInstance.locations.find((loc) => loc.id === addressId)
+		if (!location || !location.marker) return
+
+		// Reach here, we have the location and marker
+		const { infoBox } = location
+		if (action === 'openAddress') {
+			// Show infoBox if it is not open
+			if (!infoBox || !infoBox?.div_) {
+				google.maps.event.trigger(location.marker, 'click')
+			}
+		} else {
+			// Hide infoBox if it is open
+			if (infoBox && infoBox?.div_) {
+				google.maps.event.trigger(infoBox, 'closeclick')
+				infoBox.close()
+			}
+		}
+	},
+
+	/**
+	 * Close all submenus
+	 * Previously located in bricksSubmenuListener()
+	 * @since 1.11
+	 *
+	 * @since 2.0
+	 */
+	closeAllSubmenus: (element) => {
+		// STEP: Hide closest submenu & focus on parent
+		let openSubmenu = element.closest('.open')
+		let multilevel = element.closest('.brx-has-multilevel')
+
+		if (openSubmenu && !multilevel) {
+			let toggle = openSubmenu.querySelector('.brx-submenu-toggle button[aria-expanded]')
+
+			if (toggle) {
+				bricksSubmenuToggle(toggle, 'remove')
+
+				// Focus on parent
+				if (toggle) {
+					toggle.focus()
+				}
+			}
+		}
+
+		// STEP: Close all open submenus (multilevel)
+		else {
+			let openSubmenuToggles = bricksQuerySelectorAll(
+				document,
+				'.brx-submenu-toggle > button[aria-expanded="true"]'
+			)
+
+			openSubmenuToggles.forEach((toggle) => {
+				if (toggle) {
+					bricksSubmenuToggle(toggle, 'remove')
 				}
 			})
 		}
@@ -1088,6 +1233,9 @@ const bricksAnimationFn = new BricksFunction({
 							// animationId = data-animation-id
 							const animationId = el.dataset?.animationId
 
+							// Remove data-animation-id and style: animation-duration to not affect next animation (@since 2.0)
+							el.style.animationDuration = ''
+
 							if (animationId) {
 								// @since 1.8.4 - Trigger custom event for bricks/animation/end/{animationId}, provide element
 								const bricksAnimationEvent = new CustomEvent(
@@ -1144,19 +1292,19 @@ const bricksInitQueryLoopInstancesFn = new BricksFunction({
 		const isInfiniteScroll = el.classList.contains('brx-infinite-scroll')
 		const ajaxLoader = el.dataset?.brxAjaxLoader
 		const isLiveSearch = el.dataset?.brxLiveSearch
+		const disableUrlParams = el.dataset?.brxDisableUrlParams
 
-		// Find the <template [data-brx-loop-start]> element (@since 1.12.3)
-		const loopMarker = document.querySelector(`template[data-brx-loop-start="${queryElementId}"]`)
+		// Find the <[data-brx-loop-start]> element (@since 1.12.3)
+		const loopMarker = document.querySelector(`[data-brx-loop-start="${queryElementId}"]`)
 
 		if (!loopMarker) {
-			// Debug: Query Loop Marker not found
-			console.error('Bricks: Query Loop Marker not found for query element ID:', queryElementId)
-
-			return
+			// Query Loop Marker not found, this query didn't define no results message
+			el.insertAdjacentHTML('beforebegin', `<!--brx-loop-start-${queryElementId}-->`)
+		} else {
+			// Create comment and insert right before the loopMarker
+			loopMarker?.insertAdjacentHTML('beforebegin', `<!--brx-loop-start-${queryElementId}-->`)
+			loopMarker.removeAttribute('data-brx-loop-start')
 		}
-
-		// Replace it with <!--brx-loop-start-QUERYID--> HTML comment (Each comment only generated once)
-		loopMarker.replaceWith(document.createComment(`brx-loop-start-${queryElementId}`))
 
 		// STEP: Store results container
 		let resultsContainer = loopMarker?.parentNode || el.parentNode
@@ -1175,6 +1323,7 @@ const bricksInitQueryLoopInstancesFn = new BricksFunction({
 			isPostsElement: isPostsElement,
 			ajaxLoader,
 			isLiveSearch,
+			disableUrlParams, // @since 2.0
 			resultsContainer,
 			xhr: null, // Store the xhr object for each query instance (@since 1.12)
 			xhrAborted: false // Store the xhr abort status (@since 1.12)
@@ -1446,7 +1595,8 @@ function bricksQueryLoadPage(el, noDelay = false, nonceRefreshed = false) {
 			queryVars: queryInfo.queryVars,
 			page: page,
 			nonce: window.bricksData.nonce,
-			lang: window.bricksData.language || false
+			lang: window.bricksData.language || false,
+			mainQueryId: window.bricksData.mainQueryId || false // Record the main query ID (@since 2.0)
 		}
 
 		// Check if useQueryFilter is ON
@@ -1472,6 +1622,8 @@ function bricksQueryLoadPage(el, noDelay = false, nonceRefreshed = false) {
 				// Build allFilters array, no key is needed, just need each filter's ID
 				let allFilters = window.bricksUtils.getFiltersForQuery(queryElementId, 'filterId')
 				let selectedFilters = window.bricksUtils.getSelectedFiltersForQuery(queryElementId)
+				// Get active filters tags for the query (@since 2.0)
+				let afTags = window.bricksUtils.getDynamicTagsForParse(queryElementId)
 				let originalQueryVars =
 					queryInfo?.originalQueryVars === '[]'
 						? queryInfo?.queryVars
@@ -1485,9 +1637,11 @@ function bricksQueryLoadPage(el, noDelay = false, nonceRefreshed = false) {
 					filters: allFilters, // for dynamic filter update
 					infinitePage: page, // Set the latest page number
 					selectedFilters: selectedFilters, // for active filter update (@since 1.11)
+					afTags: afTags, // for active filters tags update (@since 2.0)
 					nonce: window.bricksData.nonce,
 					baseUrl: window.bricksData.baseUrl,
-					lang: window.bricksData.language || false
+					lang: window.bricksData.language || false,
+					mainQueryId: window.bricksData.mainQueryId || false // Record the main query ID (@since 2.0)
 				}
 
 				// Change the url to use the filter endpoint
@@ -1547,17 +1701,17 @@ function bricksQueryLoadPage(el, noDelay = false, nonceRefreshed = false) {
 						html = html.replace(/<!--brx-loop-start-.*?-->/g, '')
 
 						el.insertAdjacentHTML('afterend', html)
-
-						// Emit bricks/ajax/nodes_added (@since 1.11.1)
-						document.dispatchEvent(
-							new CustomEvent('bricks/ajax/nodes_added', { detail: { queryId: queryElementId } })
-						)
 					}
 
 					if (popups) {
 						// Add popups HTML at the end of the body (@since 1.7.1)
 						document.body.insertAdjacentHTML('beforeend', popups)
 					}
+
+					// Emit bricks/ajax/nodes_added (@since 1.11.1), move after popups added
+					document.dispatchEvent(
+						new CustomEvent('bricks/ajax/nodes_added', { detail: { queryId: queryElementId } })
+					)
 
 					if (styles) {
 						// Add the page styles at the end of body
@@ -1806,7 +1960,8 @@ function bricksAjaxPagination(targetEl, queryId, clickedPageNumber, nonceRefresh
 			nonce: window.bricksData.nonce,
 			paginationId: targetPaginationEl.dataset.paginationId,
 			baseUrl: window.bricksData.baseUrl,
-			lang: window.bricksData.language || false
+			lang: window.bricksData.language || false,
+			mainQueryId: window.bricksData.mainQueryId || false // Record the main query ID (@since 2.0)
 		}
 
 		// AJAX start event - AJAX loader purposes (@since 1.9)
@@ -1924,11 +2079,6 @@ function bricksAjaxPagination(targetEl, queryId, clickedPageNumber, nonceRefresh
 						} else {
 							resultsContainer.insertAdjacentHTML('beforeend', html)
 						}
-
-						// Emit bricks/ajax/nodes_added (@since 1.11.1)
-						document.dispatchEvent(
-							new CustomEvent('bricks/ajax/nodes_added', { detail: { queryId: queryId } })
-						)
 					}
 
 					// Restore the bricks-gutter-sizer
@@ -1952,6 +2102,22 @@ function bricksAjaxPagination(targetEl, queryId, clickedPageNumber, nonceRefresh
 						document.body.insertAdjacentHTML('beforeend', popups)
 					}
 
+					// Update pagination if available
+					if (pagination) {
+						const parser = new DOMParser()
+						const doc = parser.parseFromString(pagination, 'text/html')
+						const newPagination = doc.querySelector('.bricks-pagination')
+						if (newPagination) {
+							targetPaginationEl.innerHTML = ''
+							targetPaginationEl.appendChild(newPagination)
+						}
+					}
+
+					// Emit bricks/ajax/nodes_added (@since 1.11.1), move after popups and pagination added
+					document.dispatchEvent(
+						new CustomEvent('bricks/ajax/nodes_added', { detail: { queryId: queryId } })
+					)
+
 					if (styles) {
 						// Create a style element if not exists
 						let styleElement = document.querySelector(`#brx-query-styles-${queryId}`)
@@ -1965,17 +2131,6 @@ function bricksAjaxPagination(targetEl, queryId, clickedPageNumber, nonceRefresh
 
 						// Add styles to the style element
 						styleElement.innerHTML = styles
-					}
-
-					// Update pagination if available
-					if (pagination) {
-						const parser = new DOMParser()
-						const doc = parser.parseFromString(pagination, 'text/html')
-						const newPagination = doc.querySelector('.bricks-pagination')
-						if (newPagination) {
-							targetPaginationEl.innerHTML = ''
-							targetPaginationEl.appendChild(newPagination)
-						}
 					}
 
 					if (updatedQuery) {
@@ -2612,34 +2767,25 @@ const bricksBackgroundVideoInitFn = new BricksFunction({
 		 * Adding 'host' or 'origin' does not fix this error.
 		 *
 		 * @since 1.12.3: Supports short YouTube url (e.g. https://youtu.be/VIDEO_ID)
+		 * @since 2.0: Support Youtube shorts and live videos and a change to the way video ID is extracted, now using a regex pattern
 		 */
 		if (videoUrl.indexOf('youtube.com') !== -1 || videoUrl.indexOf('youtu.be') !== -1) {
 			isIframe = true
 			isYoutube = true
 
-			if (videoUrl.indexOf('watch?v=') !== -1) {
-				let videoIdIndex = videoUrl.lastIndexOf('=')
-				videoId = videoUrl.slice(videoIdIndex + 1)
-			} else if (videoUrl.indexOf('embed/') !== -1) {
-				let videoIdIndex = videoUrl.lastIndexOf('/')
-				videoId = videoUrl.slice(videoIdIndex + 1)
-			}
-			// Short YouTube URL (@since 1.12.3)
-			else if (videoUrl.indexOf('youtu.be') !== -1) {
-				let videoIdIndex = videoUrl.lastIndexOf('/')
-				videoId = videoUrl.slice(videoIdIndex + 1)
-			}
-
-			// Transform YouTube video URL into valid embed URL
-			videoUrl = videoUrl.replace('watch?v=', 'embed/')
+			const videoData = bricksGetYouTubeVideoLinkData(videoUrl)
+			videoId = videoData.id
+			videoUrl = videoData.url
 		}
 
 		/**
 		 * Vimeo embed
 		 *
+		 * @since 2.0: VideoUrl should not include '/progressive_redirect/' as that is direct link to file
+		 *
 		 * https://help.vimeo.com/hc/en-us/articles/360001494447-Using-Player-Parameters
 		 */
-		if (videoUrl.indexOf('vimeo.com') !== -1) {
+		if (videoUrl.indexOf('vimeo.com') !== -1 && videoUrl.indexOf('/progressive_redirect/') === -1) {
 			isIframe = true
 			isVimeo = true
 
@@ -2700,6 +2846,11 @@ const bricksBackgroundVideoInitFn = new BricksFunction({
 				if (!document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
 					// Create script tag for YouTube IFrame API
 					let tag = document.createElement('script')
+
+					// Builder: Compatible with Cloudflare Rocket Loader (@since 2.0)
+					if (!bricksIsFrontend && window.bricksData?.builderCloudflareRocketLoader) {
+						tag.setAttribute('data-cfasync', 'false')
+					}
 
 					// Set source to YouTube IFrame API URL
 					tag.src = 'https://www.youtube.com/iframe_api'
@@ -2794,6 +2945,11 @@ const bricksBackgroundVideoInitFn = new BricksFunction({
 				if (!document.querySelector('script[src="https://player.vimeo.com/api/player.js"]')) {
 					// STEP: Create script tag for Vimeo Player API
 					let tag = document.createElement('script')
+
+					// Builder: Compatible with Cloudflare Rocket Loader (@since 2.0)
+					if (!bricksIsFrontend && window.bricksData?.builderCloudflareRocketLoader) {
+						tag.setAttribute('data-cfasync', 'false')
+					}
 
 					// Set source to Vimeo Player API URL
 					tag.src = 'https://player.vimeo.com/api/player.js'
@@ -3137,6 +3293,13 @@ const bricksPhotoswipeFn = new BricksFunction({
 
 		const lightbox = new PhotoSwipeLightbox(options)
 
+		// Remove content placeholder if animation type is 'none' to avoid weird animation (#86bwb5vtj; @since 2.0)
+		if (animationType === 'none') {
+			lightbox.addFilter('useContentPlaceholder', (useContentPlaceholder, content) => {
+				return false
+			})
+		}
+
 		/**
 		 * Lightbox caption
 		 *
@@ -3438,6 +3601,7 @@ function bricksPhotoswipe() {
  * @returns iframe or video DOM node
  *
  * @since 1.7.2
+ * @since 2.0: Change the way we parse YouTube video, to also support live and shorts videos.
  */
 function bricksGetLightboxVideoNode(videoUrl, controls) {
 	if (videoUrl) {
@@ -3445,18 +3609,21 @@ function bricksGetLightboxVideoNode(videoUrl, controls) {
 
 		let isIframe = false // For YouTube and Vimeo embeds
 
-		if (videoUrl.indexOf('youtube.com') !== -1) {
+		if (videoUrl.indexOf('youtube.com') !== -1 || videoUrl.indexOf('youtu.be') !== -1) {
 			isIframe = true
 
-			// Transform YouTube video URL into valid embed URL
-			videoUrl = videoUrl.replace('watch?v=', 'embed/')
+			const videoData = bricksGetYouTubeVideoLinkData(videoUrl)
+			videoUrl = videoData.url
 
-			videoUrl += '?autoplay=1'
-			videoUrl += '&rel=0'
+			if (videoData.id) {
+				// Add parameters
+				videoUrl += '?autoplay=1'
+				videoUrl += '&rel=0'
 
-			// Hide YouTube controls
-			if (!controls) {
-				videoUrl += '&controls=0'
+				// Hide YouTube controls
+				if (!controls) {
+					videoUrl += '&controls=0'
+				}
 			}
 		}
 
@@ -3636,9 +3803,9 @@ const bricksAccordionFn = new BricksFunction({
 		let independentToggle = accordion.dataset.scriptArgs?.includes('independentToggle')
 
 		// Get index of item to expand (@since 1.12)
-		let expandItemIndexes = expandFirstItem ? [0] : false
+		let expandItemIndexes = expandFirstItem ? ['0'] : false
 		if (expandItemIndexes === false && accordion.hasAttribute('data-expand-item')) {
-			expandItemIndexes = accordion.getAttribute('data-expand-item')
+			expandItemIndexes = accordion.getAttribute('data-expand-item').split(',') // Split by ",", to get an array (@since 2.0)
 		}
 
 		let hash = window.location.hash || '' // Hash with # prefix
@@ -3655,7 +3822,8 @@ const bricksAccordionFn = new BricksFunction({
 
 		items.forEach((item, index) => {
 			// Expand item by index (@since 1.12)
-			if (expandItemIndexes && expandItemIndexes.includes(index)) {
+			// NOTE: expandItemIndexes is an array of strings, so we need to convert index to string (@since 2.0)
+			if (expandItemIndexes && expandItemIndexes.includes(index.toString())) {
 				expandItem(item)
 			}
 
@@ -3696,6 +3864,17 @@ const bricksAccordionFn = new BricksFunction({
 					return
 				}
 
+				/**
+				 * Builder: Return if selector detector is active
+				 *
+				 * @since 2.0
+				 */
+				const selectorDetectorActive = e.target.closest('.bricks-active-selector-detector')
+				if (selectorDetectorActive) {
+					return
+				}
+
+				// Stop propagation to avoid triggering nested accordion items
 				e.stopPropagation()
 
 				// No independent toggle: slideUp .open item (if it's currently not open)
@@ -4304,136 +4483,161 @@ function bricksCounter() {
 const bricksTableOfContentsFn = new BricksFunction({
 	parentNode: document,
 	selector: '.brxe-post-toc',
+	forceReinit: true, // Force reinit so eachElement will be called again on Bricks AJAX events, no double init as tocbot is singleton (#86c463v6t; @since 2.0)
 	eachElement: (toc) => {
-		let scriptId = toc.dataset.scriptId
-
 		// Check if toc is visible
 		const isVisible =
 			toc.offsetParent !== null &&
 			!!(toc.offsetWidth || toc.offsetHeight || toc.getClientRects().length)
 
-		if (!isVisible) {
+		// If visible, initialize immediately
+		if (isVisible) {
+			initializeTocbot(toc)
 			return
 		}
 
-		// NOTE: Not longer in use as tocbot is a singleton that only allows for one instance (@since 1.11.1)
-		// if (window.bricksData.tocbotInstances[scriptId]) {
-		// 	window.bricksData.tocbotInstances[scriptId].destroy()
-		// }
-
-		// STEP: Create IDs for each heading in the content (if heading has no 'id')
-		let contentSelector = toc.dataset.contentSelector || '.brxe-post-content'
-		let content = document.querySelector(contentSelector)
-
-		// Fallback to #brx-content
-		if (!content) {
-			content = document.querySelector('#brx-content')
-
-			if (content) {
-				contentSelector = '#brx-content'
+		// If not visible, create observer to initialize when it becomes visible
+		const observer = new IntersectionObserver(
+			(entries) => {
+				entries.forEach((entry) => {
+					if (entry.isIntersecting) {
+						// Element is visible, initialize tocbot
+						initializeTocbot(toc)
+						// Disconnect observer since we only need to initialize once
+						observer.disconnect()
+					}
+				})
+			},
+			{
+				threshold: 0.1 // Trigger when at least 10% is visible
 			}
-		}
+		)
 
-		if (!content) {
-			return
-		}
+		// Start observing the ToC element
+		observer.observe(toc)
 
-		let headingSelectors = toc.dataset.headingSelectors || 'h2, h3'
-		let headings = content.querySelectorAll(headingSelectors)
-		let headingMap = {}
+		function initializeTocbot(toc) {
+			// Always destroy tocbot first (#86c463v6t)
+			if (window.tocbot) {
+				window.tocbot.destroy()
+			}
 
-		// STEP: Generate unique element 'id' for each heading
-		headings.forEach((heading) => {
-			// Heading already has an 'id': Add ID to map & continue with next heading
-			if (heading.id && !headingMap[heading.id]) {
-				headingMap[heading.id] = 1
+			const scriptId = toc.dataset.scriptId
+
+			// STEP: Create IDs for each heading in the content (if heading has no 'id')
+			let contentSelector = toc.dataset.contentSelector || '.brxe-post-content'
+			let content = document.querySelector(contentSelector)
+
+			// Fallback to #brx-content
+			if (!content) {
+				content = document.querySelector('#brx-content')
+
+				if (content) {
+					contentSelector = '#brx-content'
+				}
+			}
+
+			if (!content) {
 				return
 			}
 
-			let generatedId = generateIDFromTextContent(heading.textContent, scriptId)
+			let headingSelectors = toc.dataset.headingSelectors || 'h2, h3'
+			let headings = content.querySelectorAll(headingSelectors)
+			let headingMap = {}
 
-			// Generated ID already exists: Append index (e.g.: #heading-1, #heading-2, etc.)
-			if (headingMap[generatedId]) {
-				headingMap[generatedId]++
-				generatedId = `${generatedId}-${headingMap[generatedId]}`
+			// STEP: Generate unique element 'id' for each heading
+			headings.forEach((heading) => {
+				// Heading already has an 'id': Add ID to map & continue with next heading
+				if (heading.id && !headingMap[heading.id]) {
+					headingMap[heading.id] = 1
+					return
+				}
+
+				let generatedId = generateIDFromTextContent(heading.textContent, scriptId)
+
+				// Generated ID already exists: Append index (e.g.: #heading-1, #heading-2, etc.)
+				if (headingMap[generatedId]) {
+					headingMap[generatedId]++
+					generatedId = `${generatedId}-${headingMap[generatedId]}`
+				}
+
+				// Add ID to map
+				else {
+					headingMap[generatedId] = 1
+				}
+
+				// Assign the generated ID to the heading and track it.
+				heading.id = generatedId
+			})
+
+			function generateIDFromTextContent(text, scriptId) {
+				let baseId = text
+					.trim()
+					.toLowerCase()
+					.normalize('NFD') // Remove accents
+					.replace(/[\u0300-\u036f]/g, '') // Remove accents
+					.replace(/[!@#$%^&*()=:;,.„“"'`]/gi, '') // Remove special characters
+					.replace(/\//gi, '-') // Replace slashes with dashes
+					.split(' ')
+					.join('-')
+
+				// ID starts with a number: Prefix required (CSS.escape works too, but looks so ugly)
+				if (/^\d/.test(baseId)) {
+					return `${scriptId}-${baseId}`
+				}
+
+				return baseId
 			}
 
-			// Add ID to map
-			else {
-				headingMap[generatedId] = 1
+			let headingsOffset = parseInt(toc.dataset.headingsOffset) || 0
+
+			// Smooth scroll enabled via Bricks settings
+			let scrollSmooth = toc.hasAttribute('data-smooth-scroll')
+
+			// STEP: tocbot options (https://tscanlin.github.io/tocbot/#api)
+			let options = {
+				tocSelector: `.brxe-post-toc[data-script-id="${scriptId}"]`,
+				contentSelector: contentSelector,
+				headingSelector: headingSelectors,
+				ignoreSelector: toc.dataset.ignoreSelector || '.toc-ignore',
+				hasInnerContainers: false,
+				linkClass: 'toc-link',
+				extraLinkClasses: '',
+				activeLinkClass: 'is-active-link',
+				listClass: 'toc-list',
+				extraListClasses: '',
+				isCollapsedClass: 'is-collapsed',
+				collapsibleClass: 'is-collapsible',
+				listItemClass: 'toc-list-item',
+				activeListItemClass: 'is-active-li',
+				collapseDepth: toc.dataset.collapseInactive ? 0 : 6,
+				scrollSmooth: headingsOffset,
+				scrollSmoothDuration: scrollSmooth && headingsOffset ? 420 : 0,
+				scrollSmoothOffset: headingsOffset ? -headingsOffset : 0,
+				headingsOffset: headingsOffset,
+				throttleTimeout: 0,
+				positionFixedSelector: null,
+				positionFixedClass: 'is-position-fixed',
+				fixedSidebarOffset: 'auto',
+				includeHtml: false,
+				includeTitleTags: false,
+				orderedList: false, // TODO: Add "Numbered" setting
+				scrollContainer: null,
+				skipRendering: false,
+				headingLabelCallback: false,
+				ignoreHiddenElements: false,
+				headingObjectCallback: null,
+				basePath: '',
+				disableTocScrollSync: false,
+				tocScrollOffset: 0
 			}
 
-			// Assign the generated ID to the heading and track it.
-			heading.id = generatedId
-		})
+			// Init tocbot
+			window.tocbot.init(options)
 
-		function generateIDFromTextContent(text, scriptId) {
-			let baseId = text
-				.trim()
-				.toLowerCase()
-				.normalize('NFD') // Remove accents
-				.replace(/[\u0300-\u036f]/g, '') // Remove accents
-				.replace(/[!@#$%^&*()=:;,.„“"'`]/gi, '') // Remove special characters
-				.replace(/\//gi, '-') // Replace slashes with dashes
-				.split(' ')
-				.join('-')
-
-			// ID starts with a number: Prefix required (CSS.escape works too, but looks so ugly)
-			if (/^\d/.test(baseId)) {
-				return `${scriptId}-${baseId}`
-			}
-
-			return baseId
+			// NOTE: Not needed as tocbot is a singleton that only allows one instance (@since 1.11.1)
+			// window.bricksData.activeToc = scriptId
 		}
-
-		let headingsOffset = parseInt(toc.dataset.headingsOffset) || 0
-
-		// Smooth scroll enabled via Bricks settings
-		let scrollSmooth = toc.hasAttribute('data-smooth-scroll')
-
-		// STEP: tocbot options (https://tscanlin.github.io/tocbot/#api)
-		let options = {
-			tocSelector: `.brxe-post-toc[data-script-id="${scriptId}"]`,
-			contentSelector: contentSelector,
-			headingSelector: headingSelectors,
-			ignoreSelector: toc.dataset.ignoreSelector || '.toc-ignore',
-			hasInnerContainers: false,
-			linkClass: 'toc-link',
-			extraLinkClasses: '',
-			activeLinkClass: 'is-active-link',
-			listClass: 'toc-list',
-			extraListClasses: '',
-			isCollapsedClass: 'is-collapsed',
-			collapsibleClass: 'is-collapsible',
-			listItemClass: 'toc-list-item',
-			activeListItemClass: 'is-active-li',
-			collapseDepth: toc.dataset.collapseInactive ? 0 : 6,
-			scrollSmooth: headingsOffset,
-			scrollSmoothDuration: scrollSmooth && headingsOffset ? 420 : 0,
-			scrollSmoothOffset: headingsOffset ? -headingsOffset : 0,
-			headingsOffset: headingsOffset,
-			throttleTimeout: 0,
-			positionFixedSelector: null,
-			positionFixedClass: 'is-position-fixed',
-			fixedSidebarOffset: 'auto',
-			includeHtml: false,
-			includeTitleTags: false,
-			orderedList: false, // TODO: Add "Numbered" setting
-			scrollContainer: null,
-			skipRendering: false,
-			headingLabelCallback: false,
-			ignoreHiddenElements: false,
-			headingObjectCallback: null,
-			basePath: '',
-			disableTocScrollSync: false,
-			tocScrollOffset: 0
-		}
-
-		// Init tocbot
-		window.tocbot.init(options)
-
-		// NOTE: Not needed as tocbot is a singleton that only allows one instance (@since 1.11.1)
-		// window.bricksData.activeToc = scriptId
 	}
 })
 
@@ -5192,6 +5396,12 @@ const bricksIsotopeFn = new BricksFunction({
 				// Remove instance from global object
 				delete window.bricksData.isotopeInstances[elementId]
 			}
+		} else if (window.bricksData.isotopeInstances[elementId]) {
+			// In builder always destroy the instance and reinitialize it or it will be multiple instances (@since 2.0)
+			window.bricksData.isotopeInstances[elementId].instance.destroy()
+
+			// Remove instance from global object
+			delete window.bricksData.isotopeInstances[elementId]
 		}
 
 		// isotopeInstance options
@@ -5217,7 +5427,8 @@ const bricksIsotopeFn = new BricksFunction({
 				percentPosition: true,
 				masonry: {
 					columnWidth: '.bricks-isotope-sizer',
-					gutter: '.bricks-gutter-sizer'
+					gutter: '.bricks-gutter-sizer',
+					horizontalOrder: brxMasonrySettings?.horizontalOrder || false //@since 2.0
 				},
 				transitionDuration: transitionDuration
 			}
@@ -5463,373 +5674,35 @@ function bricksIsotopeListeners() {
 		}
 	})
 
+	/**
+	 * When megamenu is repositioned, update isotope instance (#86c3wdmpd)
+	 *
+	 * @since 2.0
+	 */
+	document.addEventListener('bricks/megamenu/repositioned', (event) => {
+		const submenu = event.detail?.submenu || false
+		if (submenu) {
+			// Check if the submenu contains an isotope instance
+			const isotopeElements = submenu.querySelectorAll(
+				'.bricks-layout-wrapper.isotope[data-script-id]'
+			)
+
+			if (isotopeElements.length) {
+				isotopeElements.forEach((el) => {
+					const isotopeId = el.getAttribute('data-script-id')
+					// setTimeout 0 for smoother transition
+					setTimeout(() => {
+						bricksUtils.updateIsotopeInstance(isotopeId)
+					}, 0)
+				})
+			}
+		}
+	})
+
 	// Ensure each Isotope instance runs updateIsotopeInstance after all CSS are loaded (@since 1.10)
 	window.addEventListener('load', () => {
 		bricksIsotope()
 	})
-}
-
-/**
- * Element: Map
- *
- * Init maps explicit on Google Maps callback.
- */
-const bricksMapFn = new BricksFunction({
-	parentNode: document,
-	selector: '.brxe-map',
-	eachElement: (mapEl, index) => {
-		/**
-		 * Set 1000ms timeout to request next map (to avoid hitting query limits)
-		 *
-		 * https://developers.google.com/maps/premium/previous-licenses/articles/usage-limits)
-		 */
-		setTimeout(() => {
-			let settings = (() => {
-				let mapOptions = mapEl.dataset.bricksMapOptions
-
-				if (!mapOptions) {
-					return false
-				}
-
-				try {
-					return JSON.parse(mapOptions)
-				} catch (e) {
-					return false
-				}
-			})(mapEl)
-
-			if (!settings) {
-				return
-			}
-
-			let addresses = Array.isArray(settings?.addresses)
-				? settings.addresses
-				: [{ address: 'Berlin, Germany' }]
-			let markers = []
-			let markerDefault = {}
-
-			// Custom marker
-			if (settings?.marker) {
-				markerDefault.icon = {
-					url: settings.marker
-				}
-
-				if (settings?.markerHeight && settings?.markerWidth) {
-					markerDefault.icon.scaledSize = new google.maps.Size(
-						parseInt(settings.markerWidth),
-						parseInt(settings.markerHeight)
-					)
-				}
-			}
-
-			// Custom marker active
-			let markerActive = {}
-
-			if (settings?.markerActive) {
-				markerActive = {
-					url: settings.markerActive
-				}
-
-				if (settings?.markerActiveHeight && settings?.markerActiveWidth) {
-					markerActive.scaledSize = new google.maps.Size(
-						parseInt(settings.markerActiveWidth),
-						parseInt(settings.markerActiveHeight)
-					)
-				}
-			}
-
-			let infoBoxes = []
-			let bounds = new google.maps.LatLngBounds()
-
-			// 'gestureHandling' combines 'scrollwheel' and 'draggable' (which are deprecated)
-			let gestureHandling = 'auto'
-
-			if (!settings.draggable) {
-				gestureHandling = 'none'
-			} else if (settings.scrollwheel && settings.draggable) {
-				gestureHandling = 'cooperative'
-			} else if (!settings.scrollwheel && settings.draggable) {
-				gestureHandling = 'greedy'
-			}
-
-			if (settings.disableDefaultUI) {
-				settings.fullscreenControl = false
-				settings.mapTypeControl = false
-				settings.streetViewControl = false
-				settings.zoomControl = false
-			}
-
-			// https://developers.google.com/maps/documentation/javascript/reference/map#MapOptions
-			let zoom = settings.zoom ? parseInt(settings.zoom) : 12
-			let mapOptions = {
-				zoom: zoom,
-				// scrollwheel: settings.scrollwheel,
-				// draggable: settings.draggable,
-				gestureHandling: gestureHandling,
-				fullscreenControl: settings.fullscreenControl,
-				mapTypeControl: settings.mapTypeControl,
-				streetViewControl: settings.streetViewControl,
-				zoomControl: settings.zoomControl,
-				disableDefaultUI: settings.disableDefaultUI
-			}
-
-			// Set map style
-			if (settings?.styles) {
-				try {
-					mapOptions.styles = JSON.parse(settings.styles)
-				} catch (e) {}
-			}
-
-			if (settings.zoomControl) {
-				if (settings?.maxZoom) {
-					mapOptions.maxZoom = parseInt(settings.maxZoom)
-				}
-
-				if (settings?.minZoom) {
-					mapOptions.minZoom = parseInt(settings.minZoom)
-				}
-			}
-
-			let map = new google.maps.Map(mapEl, mapOptions)
-
-			// Loop through all addresses to set markers, infoBoxes, bounds etc.
-			for (let i = 0; i < addresses.length; i++) {
-				let addressObj = addresses[i]
-
-				// Render marker with Latitude/Longitude
-				if (addressObj?.latitude && addressObj?.longitude) {
-					renderMapMarker(addressObj, {
-						lat: parseFloat(addressObj.latitude),
-						lng: parseFloat(addressObj.longitude)
-					})
-				}
-				// Run Geocoding function to convert address into coordinates (use closure to pass additional variables)
-				else if (addressObj?.address) {
-					let geocoder = new google.maps.Geocoder()
-
-					geocoder.geocode({ address: addressObj.address }, geocodeCallback(addressObj))
-				}
-			}
-
-			function geocodeCallback(addressObj) {
-				let geocodeCallback = (results, status) => {
-					// Skip geocode response on error
-					if (status !== 'OK') {
-						console.warn('Geocode error:', status)
-						return
-					}
-
-					let position = results[0].geometry.location
-					renderMapMarker(addressObj, position)
-				}
-
-				return geocodeCallback
-			}
-
-			function renderMapMarker(addressObj, position) {
-				markerDefault.map = map
-				markerDefault.position = position
-
-				let marker = new google.maps.Marker(markerDefault)
-				marker.setMap(map)
-				markers.push(marker)
-
-				google.maps.event.addListener(marker, 'click', () => {
-					onMarkerClick(addressObj)
-				})
-
-				function onMarkerClick(addressObj) {
-					// First close all markers and infoBoxes
-					if (markerDefault?.icon) {
-						markers.forEach((marker) => {
-							marker.setIcon(markerDefault.icon)
-						})
-					}
-
-					infoBoxes.forEach((infoBox) => {
-						infoBox.hide()
-					})
-
-					// Set custom active marker on marker click
-					if (markerActive?.url) {
-						marker.setIcon(markerActive)
-					}
-
-					// Open infoBox (better styleable than infoWindow) on marker click
-					// http://htmlpreview.github.io/?http://github.com/googlemaps/v3-utility-library/blob/master/infobox/docs/reference.html
-					let infoboxContent = ''
-					let infoTitle = addressObj?.infoTitle || false
-					let infoSubtitle = addressObj?.infoSubtitle || false
-					let infoOpeningHours = addressObj?.infoOpeningHours || false
-					let infoImages = addressObj?.infoImages || {}
-
-					if (!Array.isArray(infoImages)) {
-						infoImages = Array.isArray(infoImages?.images) ? infoImages.images : []
-					}
-
-					if (infoTitle) {
-						infoboxContent += `<h3 class="title">${infoTitle}</h3>`
-					}
-
-					if (infoSubtitle) {
-						infoboxContent += `<p class="subtitle">${infoSubtitle}</p>`
-					}
-
-					if (infoOpeningHours) {
-						infoboxContent += '<ul class="content">'
-						infoOpeningHours = infoOpeningHours.split('\n')
-
-						if (infoOpeningHours.length) {
-							infoOpeningHours.forEach((infoOpeningHour) => {
-								infoboxContent += `<li>${infoOpeningHour}</li>`
-							})
-						}
-
-						infoboxContent += '</ul>'
-					}
-
-					if (infoImages.length) {
-						infoboxContent += '<ul class="images bricks-lightbox">'
-
-						infoImages.forEach((image) => {
-							infoboxContent += '<li>'
-
-							if (image.thumbnail && image.src) {
-								infoboxContent += `<a
-									data-pswp-src="${image.src}"
-									data-pswp-width="${image?.width || 376}"
-									data-pswp-height="${image?.height || 376}"
-									data-pswp-id="${addressObj.id}">`
-								infoboxContent += `<img src="${image.thumbnail}"/>`
-								infoboxContent += '</a>'
-							}
-
-							infoboxContent += '</li>'
-						})
-
-						infoboxContent += '</ul>'
-					}
-
-					if (infoboxContent) {
-						let infoBoxWidth = parseInt(addressObj?.infoWidth) || 300
-						let infoBoxOptions = {
-							// minWidth: infoBoxWidth,
-							// maxWidth: infoBoxWidth,
-							content: infoboxContent,
-							disableAutoPan: true,
-							pixelOffset: new google.maps.Size(0, 0),
-							alignBottom: false,
-							infoBoxClearance: new google.maps.Size(20, 20),
-							enableEventPropagation: false,
-							zIndex: 1001,
-							boxStyle: {
-								opacity: 1,
-								zIndex: 999,
-								top: 0,
-								left: 0,
-								width: `${infoBoxWidth}px`
-							}
-						}
-
-						if (typeof window.jQuery != 'undefined') {
-							infoBoxOptions.closeBoxURL = ''
-							infoBoxOptions.content += '<span class="close">×</span>'
-						}
-
-						let infoBox = new InfoBox(infoBoxOptions)
-
-						infoBox.open(map, marker)
-						infoBoxes.push(infoBox)
-
-						// Center infoBox on map (small timeout required to allow infoBox to render)
-						setTimeout(() => {
-							let infoBoxHeight = infoBox.div_.offsetHeight
-							let projectedPosition = map.getProjection().fromLatLngToPoint(marker.getPosition())
-							let infoBoxCenter = map
-								.getProjection()
-								.fromPointToLatLng(
-									new google.maps.Point(
-										projectedPosition.x,
-										projectedPosition.y - (infoBoxHeight * getLongitudePerPixel()) / 2
-									)
-								)
-							map.panTo(infoBoxCenter)
-						}, 100)
-
-						google.maps.event.addListener(infoBox, 'domready', (e) => {
-							if (infoImages.length) {
-								bricksPhotoswipe()
-							}
-
-							// Close infoBox icon listener
-							if (typeof window.jQuery != 'undefined') {
-								jQuery('.close').on('click', () => {
-									infoBox.close()
-
-									if (markerDefault?.icon) {
-										marker.setIcon(markerDefault.icon)
-									}
-
-									if (addresses.length > 1) {
-										bounds.extend(position)
-										map.fitBounds(bounds)
-										map.panToBounds(bounds)
-									}
-								})
-							}
-						})
-					}
-				}
-
-				// Get longitude per pixel based on current Zoom (for infoBox centering)
-				function getLongitudePerPixel() {
-					let latLng = map.getCenter()
-					let zoom = map.getZoom()
-					let pixelDistance = 1
-					let point1 = map
-						.getProjection()
-						.fromLatLngToPoint(
-							new google.maps.LatLng(
-								latLng.lat() - pixelDistance / Math.pow(2, zoom),
-								latLng.lng() - pixelDistance / Math.pow(2, zoom)
-							)
-						)
-					let point2 = map
-						.getProjection()
-						.fromLatLngToPoint(
-							new google.maps.LatLng(
-								latLng.lat() + pixelDistance / Math.pow(2, zoom),
-								latLng.lng() + pixelDistance / Math.pow(2, zoom)
-							)
-						)
-					return Math.abs(point2.x - point1.x)
-				}
-
-				bounds.extend(position)
-				map.fitBounds(bounds)
-				map.panToBounds(bounds)
-
-				// let mapPosition = marker.getPosition()
-				// map.setCenter(mapPosition)
-
-				// Set zoom once map is idle: As fitBounds overrules zoom
-				if (addresses.length === 1) {
-					let mapIdleListener = google.maps.event.addListener(map, 'idle', () => {
-						map.setZoom(zoom)
-						google.maps.event.removeListener(mapIdleListener)
-					})
-				}
-			}
-
-			// Set map type
-			if (settings?.type) {
-				map.setMapTypeId(settings.type)
-			}
-		}, index * 1000)
-	}
-})
-function bricksMap() {
-	bricksMapFn.run()
 }
 
 /**
@@ -6413,6 +6286,12 @@ function bricksFacebookSDK() {
 	xhr.onreadystatechange = function () {
 		if (this.readyState == 4 && this.status == 200) {
 			let fbScript = document.createElement('script')
+
+			// Builder: Compatible with Cloudflare Rocket Loader (@since 2.0)
+			if (!bricksIsFrontend && window.bricksData?.builderCloudflareRocketLoader) {
+				fbScript.setAttribute('data-cfasync', 'false')
+			}
+
 			fbScript.type = 'text/javascript'
 			fbScript.id = 'bricks-facebook-page-sdk'
 			fbScript.appendChild(document.createTextNode(xhr.responseText))
@@ -6584,9 +6463,13 @@ const bricksInteractionsFn = new BricksFunction({
 				case 'blur':
 					let attachEl = bindToDocument ? document.documentElement : sourceEl
 
-					attachEl.addEventListener(interaction.trigger, bricksInteractionCallback, {
-						once: interaction?.runOnce
-					})
+					attachEl.addEventListener(
+						interaction.trigger,
+						(e) => bricksInteractionCallback(e, interaction),
+						{
+							once: interaction?.runOnce
+						}
+					)
 					break
 
 				// @since 1.8.4
@@ -6641,7 +6524,8 @@ const bricksInteractionsFn = new BricksFunction({
 						element: sourceEl,
 						callback: (sourceEl) => bricksInteractionCallbackExecution(sourceEl, interaction),
 						once: interaction?.runOnce,
-						trigger: interaction?.trigger
+						trigger: interaction?.trigger,
+						rootMargin: interaction?.rootMargin // @since 2.0
 					})
 					break
 
@@ -6787,6 +6671,40 @@ const bricksInteractionsFn = new BricksFunction({
 					})
 
 					break
+
+				// Interactions for WooCommerce events (@since 2.0)
+				case 'wooAddedToCart':
+				case 'wooAddingToCart':
+				case 'wooRemovedFromCart':
+				case 'wooUpdateCart':
+				case 'wooCouponApplied':
+				case 'wooCouponRemoved':
+					if (typeof jQuery === 'undefined') {
+						return
+					}
+
+					let wooEvent = null
+
+					if (interaction.trigger === 'wooAddedToCart') {
+						wooEvent = 'added_to_cart'
+					} else if (interaction.trigger === 'wooAddingToCart') {
+						wooEvent = 'adding_to_cart'
+					} else if (interaction.trigger === 'wooRemovedFromCart') {
+						wooEvent = 'item_removed_from_classic_cart'
+					} else if (interaction.trigger === 'wooUpdateCart') {
+						wooEvent = 'updated_cart_totals'
+					} else if (interaction.trigger === 'wooCouponApplied') {
+						wooEvent = 'applied_coupon applied_coupon_in_checkout'
+					} else if (interaction.trigger === 'wooCouponRemoved') {
+						wooEvent = 'removed_coupon removed_coupon_in_checkout'
+					}
+
+					if (wooEvent) {
+						jQuery(document.body).on(wooEvent, (event) => {
+							bricksUtils.maybeRunOnceInteractions(sourceEl, interaction)
+						})
+					}
+					break
 			}
 		})
 
@@ -6839,12 +6757,62 @@ function bricksTrapFocus(event, node) {
  * @param {*} node
  * @since 1.11
  */
-function bricksFocusOnFirstFocusableElement(node) {
+function bricksFocusOnFirstFocusableElement(node, waitForVisible = true) {
 	let focusableElements = bricksGetFocusables(node)
 	let firstFocusableElement = focusableElements[0]
-	if (firstFocusableElement) {
+
+	if (!firstFocusableElement) return
+
+	if (!waitForVisible) {
+		// For NestedNav avoid breaking change (#86c31fdvz)
 		firstFocusableElement.focus()
+		return
 	}
+
+	// Enhance logic to consider the element's visibility to solve OffCanvas issues (@since 2.0)
+	// Check if the element is focusable
+	let maxTries = 60 // ~1s of attempts (60 frames)
+	let tries = 0
+
+	function canReceiveFocus(element) {
+		// Check if element is visible, not hidden, not covered
+		const style = window.getComputedStyle(element)
+
+		if (
+			style.display === 'none' ||
+			style.visibility !== 'visible' ||
+			parseFloat(style.opacity) < 0.1
+		) {
+			return false
+		}
+
+		const rect = element.getBoundingClientRect()
+		if (rect.width === 0 || rect.height === 0) return false
+
+		// Optional: check if element is off-screen
+		if (
+			rect.bottom < 0 ||
+			rect.top > window.innerHeight ||
+			rect.right < 0 ||
+			rect.left > window.innerWidth
+		) {
+			return false
+		}
+
+		return true
+	}
+
+	function tryFocus() {
+		if (canReceiveFocus(firstFocusableElement)) {
+			firstFocusableElement.focus()
+		} else if (tries++ < maxTries) {
+			requestAnimationFrame(tryFocus)
+		} else {
+			console.warn('Element never became focusable:', firstFocusableElement)
+		}
+	}
+
+	requestAnimationFrame(tryFocus)
 }
 
 /**
@@ -6878,7 +6846,7 @@ function bricksPopups() {
 	 *
 	 * event.detail.popupElement: Popup element
 	 * event.detail.popupId: Popup id
-	 *
+	 * - Not for Map infobox popup (@since 2.0)
 	 * @since 1.7.1
 	 */
 	document.addEventListener('bricks/popup/open', (event) => {
@@ -6886,6 +6854,11 @@ function bricksPopups() {
 		const popupElement = event.detail?.popupElement || false
 
 		if (!popupElement || !bricksIsFrontend) {
+			return
+		}
+
+		// Do not execute this logic if the opened popup is AJAX infobox (@since 2.0)
+		if (popupElement.classList.contains('brx-infobox-popup')) {
 			return
 		}
 
@@ -7027,10 +7000,12 @@ function bricksScrollInteractions() {
 /**
  * Interactions callback
  *
+ * @param {Event} event - The event that triggered the interaction
+ * @param {Object} interaction - The interaction configuration object (@since 2.0)
+ *
  * @since 1.6
  */
-function bricksInteractionCallback(event) {
-	// Possible improvement: Add "Don't add e.preventDefault() to clikc interaction"
+function bricksInteractionCallback(event, interaction) {
 	if (event?.type === 'click') {
 		// Return: Don't run interaction when clicking on an anchor ID (except for # itself)
 		if (
@@ -7041,18 +7016,14 @@ function bricksInteractionCallback(event) {
 			return
 		}
 
-		event.preventDefault()
+		// Only prevent default if it's not disabled (@since 2.0)
+		if (!interaction?.disablePreventDefault) {
+			event.preventDefault()
+		}
 	}
 
-	const interactionGroupId = event?.currentTarget?.dataset?.interactionId || 'document'
-
-	window.bricksData.interactions
-		.filter((interaction) => interaction.groupId === interactionGroupId)
-		.forEach((interaction) => {
-			if (interaction?.trigger === event.type) {
-				bricksInteractionCallbackExecution(interaction.el, interaction)
-			}
-		})
+	// Run interaction callback execution (@since 2.0.1)
+	bricksInteractionCallbackExecution(interaction.el, interaction)
 }
 
 /**
@@ -7253,6 +7224,50 @@ function bricksInteractionCallbackExecution(sourceEl, config) {
 
 			break
 
+		// Clears all form fields (@since 2.0)
+		case 'clearForm':
+			const formSelector = config?.targetFormSelector
+			let formElements = null
+
+			// If trigger is one of the 'formSubmit', 'formSuccess', 'formError', use form element itself
+			if (['formSubmit', 'formSuccess', 'formError'].includes(config.trigger)) {
+				let formSelectorId = config?.formId
+				formSelectorId = formSelectorId.replace('#', '')
+				formSelectorId = formSelectorId.replace('brxe-', '')
+				formElements = document.querySelectorAll(`.brxe-form[data-element-id="${formSelectorId}"]`)
+			}
+			// If formSelector is set, use "form" as selector
+			else if (!formSelector) {
+				formElements = document.querySelectorAll('form')
+			} else {
+				formElements = document.querySelectorAll(formSelector)
+			}
+
+			if (formElements && formElements.length) {
+				// Clear all form fields
+				formElements.forEach((form) => {
+					const inputs = form.querySelectorAll('input, textarea, select')
+					inputs.forEach((input) => {
+						if (input.tagName === 'SELECT') {
+							input.selectedIndex = 0
+						} else if (input.tagName === 'TEXTAREA') {
+							input.value = ''
+						} else if (input.type === 'checkbox' || input.type === 'radio') {
+							input.checked = false
+						} else {
+							input.value = ''
+						}
+					})
+
+					// Search for all file results buttons and click on them, to clear them
+					const fileResults = form.querySelectorAll('.file-result.show > .bricks-button.remove')
+					fileResults.forEach((fileResult) => {
+						fileResult.click()
+					})
+				})
+			}
+
+			break
 		case 'storageAdd':
 		case 'storageRemove':
 		case 'storageCount':
@@ -7281,71 +7296,80 @@ function bricksInteractionCallbackExecution(sourceEl, config) {
 			const animationType = config?.animationType
 
 			if (animationType) {
-				target.forEach((el) => {
-					// Default animation duration: 1s
-					let removeAnimationAfterMs = 1000
-					let isPopup = el?.classList.contains('brx-popup')
+				let animationDelay = 0
 
-					// Apply animation to popup content (@since 1.8)
-					if (isPopup) {
-						el = el.querySelector('.brx-popup-content')
+				// Calculating animation delay, so we can timout the animation below (@since 2.0)
+				if (config?.animationDelay) {
+					if (config.animationDelay.includes('ms')) {
+						animationDelay = parseInt(config.animationDelay)
+					} else if (config.animationDelay.includes('s')) {
+						animationDelay = parseFloat(config.animationDelay) * 1000
 					}
+				}
 
-					// Get custom animation-duration
-					if (config?.animationDuration) {
-						el.style.animationDuration = config.animationDuration
+				// Delay the action execution (@since 2.0)
+				setTimeout(() => {
+					target.forEach((el) => {
+						// Default animation duration: 1s
+						let removeAnimationAfterMs = 1000
+						let isPopup = el?.classList.contains('brx-popup')
 
-						if (config.animationDuration.includes('ms')) {
-							removeAnimationAfterMs = parseInt(config.animationDuration)
-						} else if (config.animationDuration.includes('s')) {
-							removeAnimationAfterMs = parseFloat(config.animationDuration) * 1000
-						}
-					}
-
-					// Get custom animation-delay
-					if (config?.animationDelay) {
-						el.style.animationDelay = config.animationDelay
-
-						if (config.animationDelay.includes('ms')) {
-							removeAnimationAfterMs += parseInt(config.animationDelay)
-						} else if (config.animationDelay.includes('s')) {
-							removeAnimationAfterMs += parseFloat(config.animationDelay) * 1000
-						}
-					}
-
-					/**
-					 * Animate popup
-					 *
-					 * @since 1.7 - Popup use removeAnimationAfterMs for setTimeout duration)
-					 * @since 1.8.5 - Check config.trigger to avoid recursive error (#866aqzzwf)
-					 */
-					if (isPopup && config.trigger !== 'showPopup' && config.trigger !== 'hidePopup') {
-						let popupNode = el.parentNode // el = .brx-popup-content
-						let extraParams = {} // Extra parameters for popup is required for looping popup interaction (@since 1.11)
-
-						if (sourceEl.dataset?.interactionLoopId) {
-							// Interaction has loopId: It's a looping popup
-							extraParams.loopId = sourceEl.dataset.interactionLoopId
+						// Apply animation to popup content (@since 1.8)
+						if (isPopup) {
+							el = el.querySelector('.brx-popup-content')
 						}
 
-						// Animate: open popup (if animationType includes 'In')
-						if (animationType.includes('In')) {
-							bricksOpenPopup(popupNode, removeAnimationAfterMs, extraParams)
+						// Get custom animation-duration
+						if (config?.animationDuration) {
+							el.style.animationDuration = config.animationDuration
+
+							if (config.animationDuration.includes('ms')) {
+								removeAnimationAfterMs = parseInt(config.animationDuration)
+							} else if (config.animationDuration.includes('s')) {
+								removeAnimationAfterMs = parseFloat(config.animationDuration) * 1000
+							}
 						}
-					}
 
-					el.classList.add('brx-animated')
+						// Get custom animation-delay
+						if (config?.animationDelay) {
+							// Here we can just add the adnimationDelay, as we already calculated it above (@since 2.0)
+							removeAnimationAfterMs += animationDelay
+						}
 
-					el.setAttribute('data-animation', animationType)
+						/**
+						 * Animate popup
+						 *
+						 * @since 1.7 - Popup use removeAnimationAfterMs for setTimeout duration)
+						 * @since 1.8.5 - Check config.trigger to avoid recursive error (#866aqzzwf)
+						 */
+						if (isPopup && config.trigger !== 'showPopup' && config.trigger !== 'hidePopup') {
+							let popupNode = el.parentNode // el = .brx-popup-content
+							let extraParams = {} // Extra parameters for popup is required for looping popup interaction (@since 1.11)
 
-					el.setAttribute('data-animation-id', config.id || '')
+							if (sourceEl.dataset?.interactionLoopId) {
+								// Interaction has loopId: It's a looping popup
+								extraParams.loopId = sourceEl.dataset.interactionLoopId
+							}
 
-					// Remove animation class after animation duration + delay to run again
-					bricksAnimationFn.run({
-						elementsToAnimate: [el],
-						removeAfterMs: removeAnimationAfterMs
+							// Animate: open popup (if animationType includes 'In')
+							if (animationType.includes('In')) {
+								bricksOpenPopup(popupNode, removeAnimationAfterMs, extraParams)
+							}
+						}
+
+						el.classList.add('brx-animated')
+
+						el.setAttribute('data-animation', animationType)
+
+						el.setAttribute('data-animation-id', config.id || '')
+
+						// Remove animation class after animation duration + delay to run again
+						bricksAnimationFn.run({
+							elementsToAnimate: [el],
+							removeAfterMs: removeAnimationAfterMs
+						})
 					})
-				})
+				}, animationDelay)
 			}
 			break
 
@@ -7477,6 +7501,15 @@ function bricksInteractionCallbackExecution(sourceEl, config) {
 			// Don't use the target, just pass the selector to the function
 			bricksUtils.toggleAction(sourceEl, { selector: offCanvasSelector })
 			break
+
+		// openAddress, closeAddress (@since 2.0)
+		case 'openAddress':
+		case 'closeAddress':
+			target.forEach((el) => {
+				bricksUtils.toggleMapInfoBox(config)
+			})
+
+			break
 	}
 }
 
@@ -7596,7 +7629,9 @@ function bricksFetchPopupContent(popupElement, additionalParam = {}, nonceRefres
 			popupContextType: 'post',
 			isLooping: false,
 			popupLoopId: false,
-			queryElementId: false
+			queryElementId: false,
+			lang: window.bricksData.language || false, // @since 2.0
+			mainQueryId: window.bricksData.mainQueryId || false // Record the main query ID (@since 2.0)
 		}
 
 		// Popup is looping
@@ -7626,7 +7661,16 @@ function bricksFetchPopupContent(popupElement, additionalParam = {}, nonceRefres
 			}
 		}
 
-		const url = window.bricksData.restApiUrl.concat('load_popup_content')
+		let url = window.bricksData.restApiUrl.concat('load_popup_content')
+
+		// Add Get lang parameter for WPML if current url has lang parameter (@since 2.0)
+		if (
+			window.bricksData.multilangPlugin === 'wpml' &&
+			(window.location.search.includes('lang=') || window.bricksData.wpmlUrlFormat != 3)
+		) {
+			// use window.bricksData.language to get the current language
+			url = url.concat('?lang=' + window.bricksData.language)
+		}
 
 		// AJAX popup start event - AJAX loader purposes (@since 1.9.4)
 		document.dispatchEvent(
@@ -8181,7 +8225,10 @@ function bricksNavNested() {
 				let navNested = mutation.target
 
 				// STEP: Open navNested
-				if (navNested.classList.contains('brx-open')) {
+				if (
+					navNested.classList.contains('brx-open') &&
+					!navNested.classList.contains('brx-closing')
+				) {
 					// Set popup height to viewport height (@since 1.8.2)
 					bricksSetVh() // Nav nested mobile menu uses 'top' & 'bottom' 0 instead of 100vh, though
 
@@ -8207,9 +8254,9 @@ function bricksNavNested() {
 						}, 100)
 					}
 
-					// Auto-focus on first focusable element inside .brx-nav-nested
+					// Auto-focus on first focusable element inside .brxe-nav-nested
 					else {
-						bricksFocusOnFirstFocusableElement(navNested)
+						bricksFocusOnFirstFocusableElement(navNested, false) // Check (#86c31fdvz)
 					}
 				}
 
@@ -8733,141 +8780,187 @@ function bricksOffcanvas() {
 		return
 	}
 
+	// STEP: Figure out if we should skip transition of body (in case the offcanvas is open on page load + offset effect)
+	let isOffsetOnPageLoad = offcanvasElements.some((offcanvas) => {
+		return offcanvas.classList.contains('brx-open') && offcanvas.dataset.effect === 'offset'
+	})
+
+	// Extract this to own function, as we use it in multiple places (@since 2.0)
+	const offcanvasAction = (offcanvas) => {
+		let inner = offcanvas.querySelector('.brx-offcanvas-inner')
+		let transitionDuration = inner
+			? (transitionDuration =
+					parseFloat(window.getComputedStyle(inner).getPropertyValue('transition-duration')) * 1000)
+			: 200
+
+		// STEP: Open offcanvas
+		if (offcanvas.classList.contains('brx-open')) {
+			// Set popup height to viewport height (@since 1.8.2)
+			bricksSetVh()
+
+			// Offset body by height/width of offcanvas
+			if (offcanvas.dataset.effect === 'offset') {
+				if (inner) {
+					// Get CSS transition value of .brx-offcanvas-inner
+					let direction = offcanvas.getAttribute('data-direction')
+					let transition = window.getComputedStyle(inner).getPropertyValue('transition')
+
+					document.body.style.margin = '0'
+
+					// Only set transition on body if it's not on page load (@since 2.0)
+					if (!isOffsetOnPageLoad) {
+						document.body.style.transition = transition.replace('transform', 'margin')
+					}
+
+					// Offset body by height/width of offcanvas
+					const isRTL = document.dir === 'rtl' || document.documentElement.dir === 'rtl'
+
+					// Horizontal (top/bottom)
+					if (direction === 'top') {
+						document.body.style.marginTop = `${inner.offsetHeight}px`
+					} else if (direction === 'bottom') {
+						document.body.style.marginTop = `-${inner.offsetHeight}px`
+					}
+
+					// Vertical (left/right)
+					else if (direction === 'left') {
+						if (isRTL) {
+							// Use negative marginRight for RTL instead of marginLeft (@since 1.11)
+							document.body.style.marginRight = `-${inner.offsetWidth}px`
+						} else {
+							document.body.style.marginLeft = `${inner.offsetWidth}px`
+						}
+
+						document.body.style.overflowX = 'hidden'
+					} else if (direction === 'right') {
+						// Use marginRight for RTL (@since 1.11)
+						if (isRTL) {
+							document.body.style.marginRight = `${inner.offsetWidth}px`
+						} else {
+							document.body.style.marginLeft = `-${inner.offsetWidth}px`
+						}
+
+						document.body.style.overflowX = 'hidden'
+					}
+
+					// If it's offset on page load, we need to set the transition on body after the offset/margin is applied to body (@since 2.0)
+					if (isOffsetOnPageLoad) {
+						setTimeout(() => {
+							document.body.style.transition = transition.replace('transform', 'margin')
+						}, 0)
+					}
+
+					isOffsetOnPageLoad = false
+				}
+			}
+
+			// Trap focus inside offcanvas (@since 1.11)
+			offcanvas.addEventListener('keydown', (event) => bricksTrapFocus(event, offcanvas))
+
+			// Disable body scroll
+			if (offcanvas.dataset.noScroll) {
+				document.body.classList.add('no-scroll')
+			}
+
+			// Auto-focus not disabled (@since 1.10.2)
+			if (offcanvas.dataset?.noAutoFocus !== 'true') {
+				// Auto-focus on first focusable element inside .brx-offcanvas
+				bricksFocusOnFirstFocusableElement(offcanvas)
+			}
+
+			if (offcanvas.dataset?.scrollToTop === 'true') {
+				// Auto Scroll to top of offcanvas (@since 1.10.2)
+				let offcanvasInner = offcanvas.querySelector('.brx-offcanvas-inner')
+
+				if (offcanvasInner) {
+					offcanvasInner.scrollTop = 0
+				}
+			}
+
+			// Toggle inside offcanvas is open
+			let offcanvasToggles = offcanvas.querySelectorAll(
+				'.brx-offcanvas-inner button.brxe-toggle, .brx-offcanvas-inner [data-brx-toggle-offcanvas="true"]'
+			)
+
+			if (offcanvasToggles.length) {
+				offcanvasToggles.forEach((offcanvasToggle) => {
+					let isTargetCurrentOffcanvas = false
+					const targetSelector = offcanvasToggle.dataset?.selector || '.brxe-offcanvas'
+					if (targetSelector) {
+						const targetElements = document.querySelectorAll(targetSelector) || []
+						// Check if it's targetting current offcanvas
+						isTargetCurrentOffcanvas = Array.from(targetElements).includes(offcanvas)
+					} else {
+						// Without selector, it's meant for current offcanvas
+						isTargetCurrentOffcanvas = true
+					}
+
+					// Only set is-active and aria-expanded on the correct toggle element (@since 2.0)
+					if (isTargetCurrentOffcanvas) {
+						offcanvasToggle.classList.add('is-active')
+						offcanvasToggle.setAttribute('aria-expanded', true)
+					}
+				})
+			}
+		}
+
+		// STEP: Close offcanvas
+		else {
+			offcanvas.classList.add('brx-closing') // Moved visibility style to class, and improve MutationObserver to prevent infinite loop (@since 2.0)
+
+			// Focus on toggle element that opened the offcanvas ([data-toggle-script-id])
+			let toggleScriptId = offcanvas.dataset.toggleScriptId
+			let toggleNode = document.querySelector(
+				`button[data-script-id="${toggleScriptId}"], [data-interaction-id="${toggleScriptId}"][data-brx-toggle-offcanvas]`
+			)
+
+			if (toggleNode) {
+				toggleNode.setAttribute('aria-expanded', false)
+				toggleNode.classList.remove('is-active')
+				toggleNode.focus()
+			}
+
+			if (offcanvas.dataset.effect === 'offset') {
+				if (document.body.style.marginTop) {
+					document.body.style.margin = '0'
+				}
+
+				setTimeout(() => {
+					document.body.style.margin = null
+					document.body.style.overflow = null
+					document.body.style.transition = null
+				}, transitionDuration)
+			}
+
+			setTimeout(() => {
+				// Remove .brx-closing class, as the offcanvas is closed (@since 2.0)
+				offcanvas.classList.remove('brx-closing')
+
+				// Re-enable body scroll
+				if (offcanvas.dataset.noScroll) {
+					document.body.classList.remove('no-scroll')
+					bricksSubmenuPosition()
+				}
+			}, transitionDuration)
+		}
+	}
+
 	let offcanvasObserver = new MutationObserver((mutations) => {
 		mutations.forEach((mutation) => {
 			if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
-				let offcanvas = mutation.target
-				let inner = offcanvas.querySelector('.brx-offcanvas-inner')
-				let transitionDuration = inner
-					? (transitionDuration =
-							parseFloat(window.getComputedStyle(inner).getPropertyValue('transition-duration')) *
-							1000)
-					: 200
+				// STEP: Don't run mutation, if we add or remove .brx-closing class
+				const oldValue = mutation.oldValue || ''
+				const newValue = mutation.target.classList
 
-				// STEP: Open offcanvas
-				if (offcanvas.classList.contains('brx-open')) {
-					// Set popup height to viewport height (@since 1.8.2)
-					bricksSetVh()
+				const oldClasses = oldValue.split(' ')
+				const newClasses = Array.from(newValue)
 
-					// Offset body by height/width of offcanvas
-					if (offcanvas.dataset.effect === 'offset') {
-						if (inner) {
-							// Get CSS transition value of .brx-offcanvas-inner
-							let direction = offcanvas.getAttribute('data-direction')
-							let transition = window.getComputedStyle(inner).getPropertyValue('transition')
-
-							document.body.style.margin = '0'
-							document.body.style.transition = transition.replace('transform', 'margin')
-
-							// Offset body by height/width of offcanvas
-							const isRTL = document.dir === 'rtl' || document.documentElement.dir === 'rtl'
-
-							// Horizontal (top/bottom)
-							if (direction === 'top') {
-								document.body.style.marginTop = `${inner.offsetHeight}px`
-							} else if (direction === 'bottom') {
-								document.body.style.marginTop = `-${inner.offsetHeight}px`
-							}
-
-							// Vertical (left/right)
-							else if (direction === 'left') {
-								if (isRTL) {
-									// Use negative marginRight for RTL instead of marginLeft (@since 1.11)
-									document.body.style.marginRight = `-${inner.offsetWidth}px`
-								} else {
-									document.body.style.marginLeft = `${inner.offsetWidth}px`
-								}
-
-								document.body.style.overflowX = 'hidden'
-							} else if (direction === 'right') {
-								// Use marginRight for RTL (@since 1.11)
-								if (isRTL) {
-									document.body.style.marginRight = `${inner.offsetWidth}px`
-								} else {
-									document.body.style.marginLeft = `-${inner.offsetWidth}px`
-								}
-
-								document.body.style.overflowX = 'hidden'
-							}
-						}
-					}
-
-					// Trap focus inside offcanvas (@since 1.11)
-					offcanvas.addEventListener('keydown', (event) => bricksTrapFocus(event, offcanvas))
-
-					// Disable body scroll
-					if (offcanvas.dataset.noScroll) {
-						document.body.classList.add('no-scroll')
-					}
-
-					// Auto-focus not disabled (@since 1.10.2)
-					if (offcanvas.dataset?.noAutoFocus !== 'true') {
-						// Auto-focus on first focusable element inside .brx-offcanvas
-						bricksFocusOnFirstFocusableElement(offcanvas)
-					}
-
-					if (offcanvas.dataset?.scrollToTop === 'true') {
-						// Auto Scroll to top of offcanvas (@since 1.10.2)
-						let offcanvasInner = offcanvas.querySelector('.brx-offcanvas-inner')
-
-						if (offcanvasInner) {
-							offcanvasInner.scrollTop = 0
-						}
-					}
-
-					// Toggle inside offcanvas is open
-					let offcanvasToggles = offcanvas.querySelectorAll(
-						'.brx-offcanvas-inner > button.brxe-toggle, .brx-offcanvas-inner > [data-brx-toggle-offcanvas="true"]'
-					)
-
-					if (offcanvasToggles.length) {
-						offcanvasToggles.forEach((offcanvasToggle) => {
-							offcanvasToggle.classList.add('is-active')
-							offcanvasToggle.setAttribute('aria-expanded', true)
-						})
-					}
+				// Skip if we contain "brx-closing"
+				if (oldClasses.includes('brx-closing') || newClasses.includes('brx-closing')) {
+					return
 				}
 
-				// STEP: Close offcanvas
-				else {
-					// Keep offcanvas visible until closing transition is finished (don't use class to prevent infinite MutationObserver loop)
-					offcanvas.style.visibility = 'visible'
-
-					// Focus on toggle element that opened the offcanvas ([data-toggle-script-id])
-					let toggleScriptId = offcanvas.dataset.toggleScriptId
-					let toggleNode = document.querySelector(
-						`button[data-script-id="${toggleScriptId}"], [data-interaction-id="${toggleScriptId}"][data-brx-toggle-offcanvas]`
-					)
-
-					if (toggleNode) {
-						toggleNode.setAttribute('aria-expanded', false)
-						toggleNode.classList.remove('is-active')
-						toggleNode.focus()
-					}
-
-					if (offcanvas.dataset.effect === 'offset') {
-						if (document.body.style.marginTop) {
-							document.body.style.margin = '0'
-						}
-
-						setTimeout(() => {
-							document.body.style.margin = null
-							document.body.style.overflow = null
-							document.body.style.transition = null
-						}, transitionDuration)
-					}
-
-					setTimeout(() => {
-						// Set visibility back to hidden by removing the inline style
-						offcanvas.style.visibility = null
-
-						// Re-enable body scroll
-						if (offcanvas.dataset.noScroll) {
-							document.body.classList.remove('no-scroll')
-							bricksSubmenuPosition()
-						}
-					}, transitionDuration)
-				}
+				offcanvasAction(mutation.target)
 			}
 		})
 	})
@@ -8876,7 +8969,8 @@ function bricksOffcanvas() {
 		// STEP: Observe class list changes on .brxe-offcanvas
 		offcanvasObserver.observe(offcanvas, {
 			attributes: true,
-			attributeFilter: ['class']
+			attributeFilter: ['class'],
+			attributeOldValue: true // To get the old value of the class attribute (@since 2.0)
 		})
 
 		// STEP: Close offcanvas when clicking on backdrop
@@ -8886,6 +8980,11 @@ function bricksOffcanvas() {
 			backdrop.addEventListener('click', (e) => {
 				bricksOffcanvasClose('backdrop')
 			})
+		}
+
+		// STEP: If offcanvas is open by default, update (@since 2.0)
+		if (offcanvas.classList.contains('brx-open')) {
+			offcanvasAction(offcanvas)
 		}
 	})
 
@@ -9154,15 +9253,10 @@ function bricksSubmenuToggle(toggle, action = 'toggle') {
  *
  * @since 1.8
  */
-function bricksSubmenuListeners() {
-	// STEP: Toggle submenu on mouseenter & mouseleave (desktop menu only)
-	let submenuItems = bricksQuerySelectorAll(document, '.bricks-nav-menu .menu-item-has-children')
-
-	// Include Dropdown elements
-	let dropdownMenuItems = bricksQuerySelectorAll(document, '.brxe-dropdown')
-	submenuItems = submenuItems.concat(dropdownMenuItems)
-
-	submenuItems.forEach((submenuItem) => {
+const bricksSubmenuListenersFn = new BricksFunction({
+	parentNode: document,
+	selector: '.bricks-nav-menu .menu-item-has-children, .brxe-dropdown',
+	eachElement: (submenuItem) => {
 		// Skip mouse listeners: Static, Multilevel, active menu item
 		let skipMouseListeners =
 			submenuItem.closest('[data-static]') ||
@@ -9193,7 +9287,7 @@ function bricksSubmenuListeners() {
 			if (toggle) {
 				// Only close submenus if the toggle is the top-level menu item (@since 1.11.1.1)
 				if (!toggle.closest('.brxe-dropdown.open') && !toggle.closest('.bricks-menu-item.open')) {
-					closeAllSubmenus(toggle) // Close all open submenus (@since 1.11.1)
+					bricksUtils.closeAllSubmenus(toggle) // Close all open submenus (@since 1.11.1)
 				}
 
 				bricksSubmenuToggle(toggle)
@@ -9232,45 +9326,15 @@ function bricksSubmenuListeners() {
 				bricksSubmenuToggle(toggle)
 			}
 		})
-	})
-
-	// Helper function (@since 1.11)
-	const closeAllSubmenus = (target) => {
-		// STEP: Hide closest submenu & focus on parent
-		let openSubmenu = target.closest('.open')
-		let multilevel = target.closest('.brx-has-multilevel')
-
-		if (openSubmenu && !multilevel) {
-			let toggle = openSubmenu.querySelector('.brx-submenu-toggle button[aria-expanded]')
-
-			if (toggle) {
-				bricksSubmenuToggle(toggle, 'remove')
-
-				// Focus on parent
-				if (toggle) {
-					toggle.focus()
-				}
-			}
-		}
-
-		// STEP: Close all open submenus (multilevel)
-		else {
-			let openSubmenuToggles = bricksQuerySelectorAll(
-				document,
-				'.brx-submenu-toggle > button[aria-expanded="true"]'
-			)
-
-			openSubmenuToggles.forEach((toggle) => {
-				if (toggle) {
-					bricksSubmenuToggle(toggle, 'remove')
-				}
-			})
-		}
 	}
+})
+
+function bricksSubmenuListeners() {
+	bricksSubmenuListenersFn.run() // (@since 2.0)
 
 	document.addEventListener('keyup', function (e) {
 		if (e.key === 'Escape') {
-			closeAllSubmenus(e.target)
+			bricksUtils.closeAllSubmenus(e.target)
 		}
 
 		// STEP: Tabbed out of menu item: Close menu item (if it does not contain the active element)
@@ -9375,56 +9439,20 @@ function bricksSubmenuListeners() {
 			}
 		}
 
-		// STEP: Toggle submenu button click (default) OR entire .brx-submenu-toggle on click (if 'toggleOn' set to: click, or both)
-		let submenuToggle = e.target.closest('.brx-submenu-toggle')
-		if (submenuToggle) {
-			let toggleOn = 'hover'
+		/**
+		 * STEP: Toggle submenu button click (default) OR entire .brx-submenu-toggle on click (if 'toggleOn' set to: click, or both)
+		 * @since 2.0: Target the dropdown itslef, but skip all clicks inside dropdown content (#86c21pqmy)
+		 */
+		const submenuToggle = e.target.closest('.brx-submenu-toggle')
+		const dropdown = e.target.closest('.brxe-dropdown')
+		const dropdownContent = e.target.closest('.brx-dropdown-content')
 
-			let toggleOnNode = submenuToggle.closest('[data-toggle]')
-			if (toggleOnNode) {
-				toggleOn = toggleOnNode.getAttribute('data-toggle')
-			}
-
-			// Nav menu: Toggle on entire .brx-submenu-toggle click
-			if (submenuToggle.closest('.brxe-nav-menu.show-mobile-menu')) {
-				toggleOn = 'click'
-			}
-
-			// Nav nested: Toggle on entire .brx-submenu-toggle click
-			if (submenuToggle.closest('.brxe-nav-nested.brx-open')) {
-				toggleOn = 'click'
-			}
-
-			let toggleButton =
-				toggleOn === 'hover'
-					? e.target.closest('[aria-expanded]')
-					: submenuToggle.querySelector('button[aria-expanded]')
-
-			/**
-			 * Return: Toggle on set to "hover"
-			 *
-			 * @sinc 1.8.4: Remove e.screenX = 0 && e.screenY = 0 check as not working in Safari
-			 */
-			let isKeyboardEvent = e.detail === 0
-			if (!isKeyboardEvent && toggleOn !== 'click' && toggleOn !== 'both') {
-				toggleButton = null
-			}
-
-			if (toggleButton) {
-				bricksSubmenuToggle(toggleButton)
-
-				// Set .open & active & aria-expanded in case toggle was already .open on mouseenter
-				let menuItem = submenuToggle.parentNode
-				menuItem.classList.toggle('active')
-
-				setTimeout(() => {
-					if (menuItem.classList.contains('active')) {
-						menuItem.classList.add('open')
-					}
-
-					toggleButton.setAttribute('aria-expanded', menuItem.classList.contains('open'))
-				}, 0)
-			}
+		if (dropdown && (!dropdownContent || dropdownContent.parentNode !== dropdown)) {
+			// This is a Dropdown element
+			handleDropdownToggle(dropdown, e, true)
+		} else if (submenuToggle) {
+			// This is submenu toggle inside Nav Menu
+			handleDropdownToggle(submenuToggle, e, false)
 		}
 
 		// STEP: Click outside submenu: Close open sub menus
@@ -9448,6 +9476,84 @@ function bricksSubmenuListeners() {
 			menuItem.classList.remove('active')
 		})
 	})
+
+	/**
+	 * Helper function to handle dropdown/submenu toggle logic
+	 * @since 2.0
+	 */
+	function handleDropdownToggle(element, e, isDropdown) {
+		let toggleOn = 'hover'
+
+		// If current element has data-toggle attribute, use that (@since 2.0)
+		if (element.hasAttribute('data-toggle')) {
+			toggleOn = element.getAttribute('data-toggle')
+		}
+		// else, get the closest element with data-toggle attribute (if any - used for multilevel) (@since 2.0)
+		else {
+			let toggleOnNode = element.closest('[data-toggle]')
+			if (toggleOnNode) {
+				toggleOn = toggleOnNode.getAttribute('data-toggle')
+			}
+		}
+
+		// Nav menu: Toggle on entire .brx-submenu-toggle click
+		if (element.closest('.brxe-nav-menu.show-mobile-menu')) {
+			toggleOn = 'click'
+		}
+
+		// Nav nested: Toggle on entire .brx-submenu-toggle click
+		if (element.closest('.brxe-nav-nested.brx-open')) {
+			toggleOn = 'click'
+		}
+
+		let toggleButton =
+			toggleOn === 'hover'
+				? e.target.closest('[aria-expanded]')
+				: element.querySelector(
+						isDropdown ? '.brx-submenu-toggle button[aria-expanded]' : 'button[aria-expanded]'
+					) // Dropdown: Only check inside submenu toggle  (@since 2.0)
+
+		/**
+		 * Return: Toggle on set to "hover"
+		 *
+		 * @since 1.8.4: Remove e.screenX = 0 && e.screenY = 0 check as not working in Safari
+		 */
+		let isKeyboardEvent = e.detail === 0
+		if (!isKeyboardEvent && toggleOn !== 'click' && toggleOn !== 'both') {
+			toggleButton = null
+		}
+
+		if (toggleButton) {
+			bricksSubmenuToggle(toggleButton)
+
+			// Set .open & active & aria-expanded in case toggle was already .open on mouseenter
+			let targetElement = isDropdown ? element : element.parentNode
+			targetElement.classList.toggle('active')
+
+			setTimeout(() => {
+				if (targetElement.classList.contains('active')) {
+					targetElement.classList.add('open')
+				}
+
+				toggleButton.setAttribute('aria-expanded', targetElement.classList.contains('open'))
+			}, 0)
+		}
+	}
+
+	// STEP: Set aria-current for all links inside brx-submenu-toggle. Previously in bricksSubmenuPosition (@since 2.0)
+	const submenuToggles = bricksQuerySelectorAll(document, '.brx-submenu-toggle')
+	submenuToggles.forEach((submenuToggle) => {
+		const menuItem = submenuToggle.parentNode
+		const submenu =
+			menuItem.querySelector('.brx-megamenu') ||
+			menuItem.querySelector('.brx-dropdown-content') ||
+			menuItem.querySelector('ul')
+
+		// Submenu has aria-current="page" menu item: Add .aria-current to toplevel .brx-submenu-toggle
+		if (submenu && submenu.querySelector('[aria-current="page"]')) {
+			submenuToggle.classList.add('aria-current')
+		}
+	})
 }
 
 /**
@@ -9460,9 +9566,158 @@ function bricksSubmenuListeners() {
  *
  * @since 1.8
  */
+const bricksSubmenuPositionFn = new BricksFunction({
+	parentNode: document,
+	selector: '.brx-submenu-toggle',
+	forceReinit: true,
+	eachElement: (submenuToggle) => {
+		let menuItem = submenuToggle.parentNode
+		let submenu =
+			menuItem.querySelector('.brx-megamenu') ||
+			menuItem.querySelector('.brx-dropdown-content') ||
+			menuItem.querySelector('ul')
+
+		// Skip: Submenu not found (not rendered due to element condition)
+		if (!submenu) {
+			return
+		}
+
+		submenu.classList.add('brx-submenu-positioned')
+		// Skip: Static submenu (e.g. Dropdown inside Offcanvas)
+		if (menuItem.hasAttribute('data-static')) {
+			return
+		}
+
+		let docWidth = document.body.clientWidth // document width without scrollbar
+
+		// STEP: Mega menu
+		let hasMegamenu = menuItem.classList.contains('brx-has-megamenu')
+
+		if (hasMegamenu) {
+			// Get mega menu settings
+			let referenceNodeSelector = menuItem.dataset.megaMenu
+			let verticalReferenceNodeSelector = menuItem.dataset.megaMenuVertical
+
+			// Get reference node
+			let referenceNode = document.body // Default: Cover entire body width
+			if (referenceNodeSelector) {
+				let customReferenceNode = document.querySelector(referenceNodeSelector)
+				if (customReferenceNode) {
+					referenceNode = customReferenceNode
+				}
+			}
+
+			// Get node rects for calculation
+			let menuItemRect = menuItem.getBoundingClientRect()
+			let referenceNodeRect = referenceNode.getBoundingClientRect()
+
+			// Set horizontal position and width
+			submenu.style.left = `-${menuItemRect.left - referenceNodeRect.left}px`
+			submenu.style.minWidth = `${referenceNodeRect.width}px`
+
+			// Set vertical position (if selector was added and node exists)
+			if (verticalReferenceNodeSelector) {
+				let verticalReferenceNode = document.querySelector(verticalReferenceNodeSelector)
+				if (verticalReferenceNode) {
+					let verticalReferenceNodeRect = verticalReferenceNode.getBoundingClientRect()
+					submenu.style.top = `${
+						menuItemRect.height + verticalReferenceNodeRect.bottom - menuItemRect.bottom
+					}px`
+				}
+			}
+
+			// Dispatch custom event after repositioning the mega menu (@since 2.0)
+			if (bricksIsFrontend) {
+				document.dispatchEvent(
+					new CustomEvent('bricks/megamenu/repositioned', {
+						detail: {
+							menuItem: menuItem,
+							submenu: submenu
+						}
+					})
+				)
+			}
+		}
+
+		// STEP: Default submenu
+		else {
+			// Remove overflow class to reapply logic on window resize
+			if (submenu.classList.contains('brx-multilevel-overflow-right')) {
+				submenu.classList.remove('brx-multilevel-overflow-right')
+			}
+
+			if (submenu.classList.contains('brx-submenu-overflow-right')) {
+				submenu.classList.remove('brx-submenu-overflow-right')
+			}
+
+			if (submenu.classList.contains('brx-sub-submenu-overflow-right')) {
+				submenu.classList.remove('brx-sub-submenu-overflow-right')
+			}
+
+			// Check if submenu is nested inside another brx-dropdown
+			let isToplevel =
+				!menuItem.parentNode.closest('.menu-item') && !menuItem.parentNode.closest('.brxe-dropdown')
+
+			// STEP: Re-position in case of viewport overflow
+			let submenuRect = submenu.getBoundingClientRect()
+			let submenuWidth = submenuRect.width
+			let submenuRight = submenuRect.right
+			let submenuLeft = Math.ceil(submenuRect.left)
+
+			// STEP: Submenu wider than viewport: Set submenu to viewport width
+			if (submenuWidth > docWidth) {
+				submenu.style.left = `-${submenuLeft}px`
+				submenu.style.minWidth = `${docWidth}px`
+			}
+
+			// STEP: Dropdown content overflows viewport to the right: Re-position to prevent horizontal scrollbar
+			else if (submenuRight > docWidth) {
+				let multilevel = submenu.closest('.brx-has-multilevel')
+
+				// Top level of multilevel menu: Position all menus to the right
+				if (multilevel) {
+					submenu.classList.add('brx-multilevel-overflow-right')
+				}
+
+				// Default submenu
+				else {
+					if (isToplevel) {
+						submenu.classList.add('brx-submenu-overflow-right')
+					} else {
+						submenu.classList.add('brx-sub-submenu-overflow-right')
+					}
+				}
+			}
+
+			// STEP: Dropdown content overflows viewport on the left
+			else if (submenuLeft < 0) {
+				submenu.style.left = !isToplevel ? '100%' : '0' // Position submenu to the right of the parent menu item (@since 2.0)
+				submenu.style.right = 'auto'
+			}
+		}
+	}
+})
+
 function bricksSubmenuPosition(timeout = 0) {
 	setTimeout(() => {
-		let docWidth = document.body.clientWidth // document width without scrollbar
+		bricksSubmenuPositionFn.run()
+	}, timeout)
+}
+
+/**
+ * Handle submenu before position logic on window resize
+ * - Save initial width and height by using requestAnimationFrame
+ * - Only execute bricksSubmenuBeforePosition if actual resize is detected
+ * @since 2.0
+ */
+function bricksSubmenuWindowResizeHandler() {
+	let lastWidth, lastHeight, submenuTimeout
+
+	/**
+	 * Remove .brx-submenu-positioned class from submenu elements to apply display:none while resizing
+	 * @since 1.12.2
+	 */
+	const bricksSubmenuBeforePosition = () => {
 		let submenuToggles = bricksQuerySelectorAll(document, '.brx-submenu-toggle')
 
 		submenuToggles.forEach((submenuToggle) => {
@@ -9476,134 +9731,57 @@ function bricksSubmenuPosition(timeout = 0) {
 			if (!submenu) {
 				return
 			}
-			submenu.classList.add('brx-submenu-positioned')
-			// Skip: Static submenu (e.g. Dropdown inside Offcanvas)
-			if (menuItem.hasAttribute('data-static')) {
-				return
-			}
 
-			// Submenu has aria-current="page" menu item: Add .aria-current to toplevel .brx-submenu-toggle
-			if (submenu.querySelector('[aria-current="page"]')) {
-				submenuToggle.classList.add('aria-current')
-			}
-
-			// STEP: Mega menu
-			let hasMegamenu = menuItem.classList.contains('brx-has-megamenu')
-
-			if (hasMegamenu) {
-				// Get mega menu settings
-				let referenceNodeSelector = menuItem.dataset.megaMenu
-				let verticalReferenceNodeSelector = menuItem.dataset.megaMenuVertical
-
-				// Get reference node
-				let referenceNode = document.body // Default: Cover entire body width
-				if (referenceNodeSelector) {
-					let customReferenceNode = document.querySelector(referenceNodeSelector)
-					if (customReferenceNode) {
-						referenceNode = customReferenceNode
-					}
-				}
-
-				// Get node rects for calculation
-				let menuItemRect = menuItem.getBoundingClientRect()
-				let referenceNodeRect = referenceNode.getBoundingClientRect()
-
-				// Set horizontal position and width
-				submenu.style.left = `-${menuItemRect.left - referenceNodeRect.left}px`
-				submenu.style.minWidth = `${referenceNodeRect.width}px`
-
-				// Set vertical position (if selector was added and node exists)
-				if (verticalReferenceNodeSelector) {
-					let verticalReferenceNode = document.querySelector(verticalReferenceNodeSelector)
-					if (verticalReferenceNode) {
-						let verticalReferenceNodeRect = verticalReferenceNode.getBoundingClientRect()
-						submenu.style.top = `${
-							menuItemRect.height + verticalReferenceNodeRect.bottom - menuItemRect.bottom
-						}px`
-					}
-				}
-			}
-
-			// STEP: Default submenu
-			else {
-				// Remove overflow class to reapply logic on window resize
-				if (submenu.classList.contains('brx-multilevel-overflow-right')) {
-					submenu.classList.remove('brx-multilevel-overflow-right')
-				}
-
-				if (submenu.classList.contains('brx-submenu-overflow-right')) {
-					submenu.classList.remove('brx-submenu-overflow-right')
-				}
-
-				if (submenu.classList.contains('brx-sub-submenu-overflow-right')) {
-					submenu.classList.remove('brx-sub-submenu-overflow-right')
-				}
-
-				// STEP: Re-position in case of viewport overflow
-				let submenuRect = submenu.getBoundingClientRect()
-				let submenuWidth = submenuRect.width
-				let submenuRight = submenuRect.right
-				let submenuLeft = Math.ceil(submenuRect.left)
-
-				// STEP: Submenu wider than viewport: Set submenu to viewport width
-				if (submenuWidth > docWidth) {
-					submenu.style.left = `-${submenuLeft}px`
-					submenu.style.minWidth = `${docWidth}px`
-				}
-
-				// STEP: Dropdown content overflows viewport to the right: Re-position to prevent horizontal scrollbar
-				else if (submenuRight > docWidth) {
-					let multilevel = submenu.closest('.brx-has-multilevel')
-					let isToplevel =
-						!menuItem.parentNode.closest('.menu-item') &&
-						!menuItem.parentNode.closest('.brxe-dropdown')
-
-					// Top level of multilevel menu: Position all menus to the right
-					if (multilevel) {
-						submenu.classList.add('brx-multilevel-overflow-right')
-					}
-
-					// Default submenu
-					else {
-						if (isToplevel) {
-							submenu.classList.add('brx-submenu-overflow-right')
-						} else {
-							submenu.classList.add('brx-sub-submenu-overflow-right')
-						}
-					}
-				}
-
-				// STEP: Dropdown content overflows viewport on the left (RTL)
-				else if (submenuLeft < 0) {
-					submenu.style.left = '100%'
-					submenu.style.right = 'auto'
-				}
-			}
+			submenu.classList.remove('brx-submenu-positioned')
 		})
-	}, timeout)
-}
+	}
 
-/**
- * Remove .brx-submenu-positioned class from submenu elements to apply display:none while resizing
- * @since 1.12.2
- */
-function bricksSubmenuBeforePosition() {
-	let submenuToggles = bricksQuerySelectorAll(document, '.brx-submenu-toggle')
+	// Resize event handler (Only execute logic on actual resize, ignore if only mobile address bar/height changes)
+	const handleResize = () => {
+		const currentWidth = window.innerWidth
+		const currentHeight = window.innerHeight
 
-	submenuToggles.forEach((submenuToggle) => {
-		let menuItem = submenuToggle.parentNode
-		let submenu =
-			menuItem.querySelector('.brx-megamenu') ||
-			menuItem.querySelector('.brx-dropdown-content') ||
-			menuItem.querySelector('ul')
-
-		// Skip: Submenu not found (not rendered due to element condition)
-		if (!submenu) {
+		// Only recalculate if width changes
+		if (currentWidth === lastWidth) {
 			return
 		}
 
-		submenu.classList.remove('brx-submenu-positioned')
-	})
+		// Clear timeout
+		clearTimeout(submenuTimeout)
+
+		// Actual resize detected, execute logic to hide submenus while resizing
+		bricksSubmenuBeforePosition()
+
+		// Re-calculate left position on window resize with debounce (@since 1.8)
+		submenuTimeout = setTimeout(bricksSubmenuPosition, 250)
+
+		// Update stored dimensions
+		lastWidth = currentWidth
+		lastHeight = currentHeight
+	}
+
+	// Wait for stable viewport dimensions before starting to listen for resize events
+	const waitForStableViewport = () => {
+		let width = window.innerWidth
+		let height = window.innerHeight
+
+		requestAnimationFrame(() => {
+			if (width === window.innerWidth && height === window.innerHeight) {
+				// Viewport is stable, set the initial dimensions
+				lastWidth = width
+				lastHeight = height
+
+				// Start listening for actual resize events
+				window.addEventListener('resize', handleResize)
+			} else {
+				// Viewport is still changing, keep checking
+				waitForStableViewport()
+			}
+		})
+	}
+
+	// Initial check
+	waitForStableViewport()
 }
 
 /**
@@ -10104,6 +10282,8 @@ function bricksGetQueryResult(queryId, isPopState = false, nonceRefreshed = fals
 
 		// Get selected filters for the query
 		let selectedFilters = window.bricksUtils.getSelectedFiltersForQuery(queryId)
+		// Get active filters tags for the query (@since 2.0)
+		let afTags = window.bricksUtils.getDynamicTagsForParse(queryId)
 		let originalQueryVars =
 			queryInstance?.originalQueryVars === '[]'
 				? queryInstance?.queryVars
@@ -10115,9 +10295,11 @@ function bricksGetQueryResult(queryId, isPopState = false, nonceRefreshed = fals
 			pageFilters: window.bricksData.pageFilters || false,
 			filters: allFilters, // for dynamic filter update
 			selectedFilters: selectedFilters, // for active filter update (@since 1.11)
+			afTags: afTags, // for active filters tags update (@since 2.0)
 			nonce: window.bricksData.nonce,
 			baseUrl: window.bricksData.baseUrl,
-			lang: window.bricksData.language || false
+			lang: window.bricksData.language || false,
+			mainQueryId: window.bricksData.mainQueryId || false // Record the main query ID (@since 2.0)
 		}
 
 		// Add Get lang parameter for WPML if current url has lang parameter (@since 1.9.9)
@@ -10266,9 +10448,9 @@ function bricksDisplayQueryResult(targetQueryId, res) {
 	const html = res?.html || false
 	const styles = res?.styles || false
 	const popups = res?.popups || false
-	// const pagination = res?.pagination || false
 	const updatedQuery = res?.updated_query || false
 	const updatedFilters = res?.updated_filters || false
+	const parsedAfTags = res?.parsed_af_tags || false // @since 2.0
 
 	// Get query instance
 	const queryInstance = window.bricksData.queryLoopInstances[targetQueryId] || false
@@ -10349,11 +10531,6 @@ function bricksDisplayQueryResult(targetQueryId, res) {
 		} else {
 			resultsContainer.insertAdjacentHTML('beforeend', html)
 		}
-
-		// Emit bricks/ajax/nodes_added (@since 1.11.1)
-		document.dispatchEvent(
-			new CustomEvent('bricks/ajax/nodes_added', { detail: { queryId: targetQueryId } })
-		)
 	}
 
 	// Restore the bricks-gutter-sizer
@@ -10377,6 +10554,11 @@ function bricksDisplayQueryResult(targetQueryId, res) {
 		document.body.insertAdjacentHTML('beforeend', popups)
 	}
 
+	// Emit bricks/ajax/nodes_added (@since 1.11.1), move after popups added
+	document.dispatchEvent(
+		new CustomEvent('bricks/ajax/nodes_added', { detail: { queryId: targetQueryId } })
+	)
+
 	if (styles) {
 		// Create a style element if not exists
 		let styleElement = document.querySelector(`#brx-query-styles-${targetQueryId}`)
@@ -10395,6 +10577,16 @@ function bricksDisplayQueryResult(targetQueryId, res) {
 	// (@since 1.12.2)
 	if (updatedQuery) {
 		bricksUtils.updateQueryResultStats(targetQueryId, 'query', updatedQuery)
+	}
+
+	/**
+	 * STEP: Replace any existing span[data-brx-af-count] innerHTML with the updated count
+	 *
+	 * {active_filters_count} DD
+	 * @since 2.0
+	 */
+	if (parsedAfTags) {
+		window.bricksUtils.updateParsedDynamicTags(targetQueryId, parsedAfTags)
 	}
 
 	/**
@@ -10491,6 +10683,44 @@ function bricksDisplayQueryResult(targetQueryId, res) {
 				})
 			}
 		}, 250)
+	}
+}
+
+/**
+ * Convert YouTube video URL to the embed URL, and also return video ID
+ *
+ * @param {string} url YouTube video URL
+ *
+ * @return {Object} Object containing embed URL and video ID
+ *
+ * @since 2.0
+ */
+function bricksGetYouTubeVideoLinkData(url) {
+	if (!url) {
+		return {
+			url: '',
+			id: null
+		}
+	}
+	const youtubeRegex =
+		/(?:youtube(?:-nocookie)?\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|shorts\/|live\/|.*[?&]v=)|youtu\.be\/)([^"&?\/ ]{11})/i
+	const match = url.match(youtubeRegex)
+
+	if (match && match[1]) {
+		const videoId = match[1]
+
+		// Create embed URL with video ID
+		const embedUrl = `https://www.youtube.com/embed/${videoId}`
+		return {
+			url: embedUrl,
+			id: videoId
+		}
+	}
+
+	// If no match, return the original URL
+	return {
+		url,
+		id: null
 	}
 }
 
@@ -10593,6 +10823,9 @@ document.addEventListener('DOMContentLoaded', (event) => {
 	bricksIsotope()
 	bricksIsotopeListeners()
 
+	// Handle submenu before position logic (@since 2.0)
+	window.addEventListener('load', bricksSubmenuWindowResizeHandler)
+
 	/**
 	 * Debounce
 	 *
@@ -10601,8 +10834,6 @@ document.addEventListener('DOMContentLoaded', (event) => {
 	 * @since 1.8
 	 */
 	window.addEventListener('resize', () => {
-		bricksSubmenuBeforePosition() // @since 1.12.2
-
 		Object.keys(bricksTimeouts).forEach((key) => {
 			clearTimeout(bricksTimeouts[key])
 		})
@@ -10618,8 +10849,8 @@ document.addEventListener('DOMContentLoaded', (event) => {
 			bricksTimeouts.bricksSplide = setTimeout(bricksSplide, 250)
 		}
 
-		// Re-calculate left position on window resize with debounce (@since 1.8)
-		bricksTimeouts.bricksSubmenuPosition = setTimeout(bricksSubmenuPosition, 250)
+		// Re-calculate left position on window resize with debounce (@since 1.8) Moved to bricksSubmenuWindowResizeHandler()
+		// bricksTimeouts.bricksSubmenuPosition = setTimeout(bricksSubmenuPosition, 250)
 
 		// Set mobile menu open toggle parent div display according to toggle display
 		bricksTimeouts.bricksToggleDisplay = setTimeout(bricksToggleDisplay, 100)
@@ -10629,9 +10860,6 @@ document.addEventListener('DOMContentLoaded', (event) => {
 			bricksNavMenuMobileToggleDisplay,
 			100
 		)
-
-		// NOTE: Just for reference. Not in use (@since 1.8.5)
-		// bricksTimeouts.bricksBackgroundVideo = setTimeout(bricksBackgroundVideoInit, 100)
 	})
 
 	/**

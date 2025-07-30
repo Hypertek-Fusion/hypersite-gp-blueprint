@@ -183,6 +183,11 @@ class Woocommerce_Cart_Coupon extends Element {
 
 		Woocommerce_Helpers::maybe_init_cart_context();
 
+		// Avoid Fatal error if WC()->cart is not defined (@since 2.0)
+		if ( ! function_exists( 'WC' ) || ! WC()->cart ) {
+			return;
+		}
+
 		if ( ! wc_coupons_enabled() ) {
 			// translators: %1$s: opening a tag, %2$s: closing a tag
 			return $this->render_element_placeholder( [ 'title' => sprintf( esc_html__( 'Coupons are disabled. To enable coupons go to %1$sWooCommerce settings%2$s', 'bricks' ), '<a href="' . admin_url( 'admin.php?page=wc-settings' ) . '">', '</a>' ) ] );

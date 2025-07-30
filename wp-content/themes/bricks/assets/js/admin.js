@@ -300,7 +300,7 @@ function bricksAdminSettings() {
 	var saveSettingsButton = settingsForm.querySelector('input[name="save"]')
 
 	if (saveSettingsButton) {
-		saveSettingsButton.addEventListener('click', function (e) {
+		saveSettingsButton.addEventListener('click', function () {
 			if (submitWrapper) {
 				submitWrapper.remove()
 			}
@@ -309,15 +309,15 @@ function bricksAdminSettings() {
 				spinner.classList.add('is-active')
 			}
 
-			jQuery.ajax({
+			window.jQuery.ajax({
 				type: 'POST',
-				url: bricksData.ajaxUrl,
+				url: window.bricksData.ajaxUrl,
 				data: {
 					action: 'bricks_save_settings',
-					formData: jQuery(settingsForm).serialize(),
+					formData: window.jQuery(settingsForm).serialize(),
 					nonce: window.bricksData.nonce
 				},
-				success: function (res) {
+				success: function () {
 					// Show save message
 					let hash = window.location.hash
 
@@ -331,8 +331,8 @@ function bricksAdminSettings() {
 	var resetSettingsButton = settingsForm.querySelector('input[name="reset"]')
 
 	if (resetSettingsButton) {
-		resetSettingsButton.addEventListener('click', function (e) {
-			var confirmed = confirm(bricksData.i18n.confirmResetSettings)
+		resetSettingsButton.addEventListener('click', function () {
+			var confirmed = confirm(window.bricksData.i18n.confirmResetSettings)
 
 			if (!confirmed) {
 				return
@@ -346,9 +346,9 @@ function bricksAdminSettings() {
 				spinner.classList.add('is-active')
 			}
 
-			jQuery.ajax({
+			window.jQuery.ajax({
 				type: 'POST',
-				url: bricksData.ajaxUrl,
+				url: window.bricksData.ajaxUrl,
 				data: {
 					action: 'bricks_reset_settings',
 					nonce: window.bricksData.nonce
@@ -701,61 +701,68 @@ function bricksAdminGenerateCssFile(index, results, counter, data) {
  * @since 1.5: Convert elements to nestable elements
  */
 function bricksAdminRunConverter() {
-	var button = document.getElementById('bricks-run-converter')
+	var converterButtons = document.querySelectorAll('.bricks-run-converter')
 
-	if (!button) {
+	if (!converterButtons.length) {
 		return
 	}
 
-	button.addEventListener('click', function (e) {
-		e.preventDefault()
+	converterButtons.forEach(function (button) {
+		button.addEventListener('click', function (e) {
+			e.preventDefault()
 
-		let data = {
-			action: 'bricks_get_converter_items',
-			nonce: bricksData.nonce,
-			convert: []
-		}
-
-		if (document.getElementById('convert_element_ids_classes').checked) {
-			data.convert.push('elementClasses')
-		}
-
-		if (document.getElementById('convert_container').checked) {
-			data.convert.push('container')
-		}
-
-		// @since 1.5.1 to add position: relative as needed
-		if (document.getElementById('add_position_relative').checked) {
-			data.convert.push('addPositionRelative')
-		}
-
-		// @since 1.6 to convert entry animation ('_animation') to interactions
-		if (document.getElementById('entry_animation_to_interaction').checked) {
-			data.convert.push('entryAnimationToInteraction')
-		}
-
-		if (!data.convert.length) {
-			return
-		}
-
-		jQuery.ajax({
-			type: 'POST',
-			url: bricksData.ajaxUrl,
-			data,
-			beforeSend: () => {
-				button.setAttribute('disabled', 'disabled')
-				button.classList.add('wait')
-			},
-			success: (res) => {
-				console.info('bricks_get_converter_items', res.data)
-
-				// Start running converter (index = 0)
-				let index = 0
-				let data = res.data.items
-				let convert = res.data.convert
-
-				bricksAdminConvert(index, data, convert)
+			let data = {
+				action: 'bricks_get_converter_items',
+				nonce: bricksData.nonce,
+				convert: []
 			}
+
+			// Convert global elements to components (@since 2.0)
+			if (button.id === 'bricks-run-converter-global-elements') {
+				data.convert.push('globalElementsToComponents')
+			}
+
+			if (document.getElementById('convert_element_ids_classes').checked) {
+				data.convert.push('elementClasses')
+			}
+
+			if (document.getElementById('convert_container').checked) {
+				data.convert.push('container')
+			}
+
+			// @since 1.5.1 to add position: relative as needed
+			if (document.getElementById('add_position_relative').checked) {
+				data.convert.push('addPositionRelative')
+			}
+
+			// @since 1.6 to convert entry animation ('_animation') to interactions
+			if (document.getElementById('entry_animation_to_interaction').checked) {
+				data.convert.push('entryAnimationToInteraction')
+			}
+
+			if (!data.convert.length) {
+				return
+			}
+
+			jQuery.ajax({
+				type: 'POST',
+				url: bricksData.ajaxUrl,
+				data,
+				beforeSend: () => {
+					button.setAttribute('disabled', 'disabled')
+					button.classList.add('wait')
+				},
+				success: (res) => {
+					console.info('bricks_get_converter_items', res.data)
+
+					// Start running converter (index = 0)
+					let index = 0
+					let data = res.data.items
+					let convert = res.data.convert
+
+					bricksAdminConvert(index, data, convert)
+				}
+			})
 		})
 	})
 }
@@ -771,7 +778,7 @@ function bricksAdminConvert(index, data, convert) {
 			convert: convert
 		},
 		success: function (res) {
-			var button = document.getElementById('bricks-run-converter')
+			var button = document.querySelector('.bricks-run-converter[disabled]')
 			var resultsEl = button.parentNode.querySelector('.results')
 
 			// Add results HTML (div.results > ul)
@@ -1105,7 +1112,6 @@ function bricksRemoteTemplateUrls() {
 			})
 		})
 
-		// Insert clone after last remote template wrapper
 		remoteTemplateWrapper.after(clone)
 	})
 }
@@ -1452,31 +1458,76 @@ function bricksAdminCodeReviewFilter() {
 }
 
 /**
+ * Global elements review
+ *
+ * @since 2.0
+ */
+function bricksAdminGlobalElementsReview() {
+	const convertButtons = document.querySelectorAll('.bricks-convert-global-elements')
+
+	convertButtons.forEach((button) => {
+		button.addEventListener('click', (e) => {
+			e.preventDefault()
+
+			let unlinkNestables = false
+			let reviewItemNode = e.target.closest('.bricks-code-review-item')
+
+			if (reviewItemNode && reviewItemNode.querySelector('.nestable')) {
+				unlinkNestables = confirm(window.bricksData.i18n.globalElementsConvertConfirm)
+			}
+
+			jQuery.ajax({
+				type: 'POST',
+				url: bricksData.ajaxUrl,
+				data: {
+					action: 'bricks_convert_global_elements',
+					nonce: bricksData.nonce,
+					postId: button.getAttribute('data-post-id'),
+					unlinkNestables: unlinkNestables
+				},
+				beforeSend: () => {
+					button.setAttribute('disabled', 'disabled')
+					button.classList.add('wait')
+				},
+				success: (res) => {
+					button.removeAttribute('disabled')
+					button.classList.remove('wait')
+
+					if (res.data.message) {
+						alert(res.data.message)
+					}
+
+					// Reload tab (easier than updating the DOM)
+					location.reload()
+				}
+			})
+		})
+	})
+}
+
+/**
  * Maintenance mode: Toggle visibility of render header/footer checkboxes
  *
  * @since 1.9.9
  */
 function bricksAdminMaintenanceTemplateListener() {
 	let maintenanceTemplateSelect = document.getElementById('maintenance-template')
-	let renderFooterWrapper = document
-		.getElementById('maintenanceRenderFooter')
-		?.closest('.setting-wrapper')
-	let renderHeaderWrapper = document
-		.getElementById('maintenanceRenderHeader')
-		?.closest('.setting-wrapper')
 
-	if (!maintenanceTemplateSelect || !renderFooterWrapper || !renderHeaderWrapper) {
+	let maintenanceTemplateSelectSection = document.getElementById('maintenance-template-section')
+	let renderSection = document.getElementById('maintenance-render-section')
+
+	if (!renderSection) {
 		return
 	}
 
 	function toggleRenderOptions() {
 		let selectedValue = maintenanceTemplateSelect.value
 		if (selectedValue === '') {
-			renderFooterWrapper.style.display = 'none'
-			renderHeaderWrapper.style.display = 'none'
+			renderSection.style.display = 'none'
+			maintenanceTemplateSelectSection.style.borderBottom = 'none'
 		} else {
-			renderFooterWrapper.style.display = 'block'
-			renderHeaderWrapper.style.display = 'block'
+			renderSection.style.display = 'block'
+			maintenanceTemplateSelectSection.style.borderBottom = '1px solid var(--admin-color-border)'
 		}
 	}
 
@@ -1629,16 +1680,51 @@ function bricksAdminWooSettings() {
 }
 
 /**
- * Template exclusion multiselect handler
+ * Create a multiselect dropdown for any select element with AJAX support
  *
- * @since 1.12.2
+ * @since 2.0
+ *
+ * @param {string} selectId - The ID of the select element to transform
+ * @param {Object} options - Configuration options
+ * @param {string} options.placeholder - Placeholder text when no items selected
+ * @param {string} options.searchPlaceholder - Placeholder text for search input
+ * @param {string} options.dataAttribute - Data attribute name for selected items
+ * @param {boolean} options.ajaxSearch - Whether to use AJAX for searching
+ * @param {Object} options.ajaxOptions - AJAX specific options
+ * @param {string} options.ajaxOptions.action - AJAX action to call
+ * @param {Object} options.ajaxOptions.params - Additional parameters to send with the AJAX request
+ * @param {number} options.ajaxOptions.minSearchLength - Minimum search length to trigger AJAX search
+ * @param {number} options.ajaxOptions.debounceTime - Debounce time in milliseconds
+ * @returns {void}
  */
-function bricksAdminTemplateExclusion() {
-	const select = document.getElementById('excludedTemplates')
+function bricksCreateMultiselect(selectId, options = {}) {
+	const select = document.getElementById(selectId)
 	const wrapper = select?.parentElement
 
 	if (!select || !wrapper) {
 		return
+	}
+
+	// Default options
+	const defaults = {
+		placeholder: window.bricksData?.i18n?.selectItems,
+		searchPlaceholder: window.bricksData?.i18n?.searchItems,
+		dataAttribute: 'data-item-id',
+		ajaxSearch: false,
+		ajaxOptions: {
+			action: 'bricks_get_posts',
+			params: {},
+			minSearchLength: 2,
+			debounceTime: 300
+		}
+	}
+
+	// Merge defaults with provided options
+	const config = { ...defaults, ...options }
+
+	// Merge ajax options
+	if (options.ajaxOptions) {
+		config.ajaxOptions = { ...defaults.ajaxOptions, ...options.ajaxOptions }
 	}
 
 	// Create custom control wrapper
@@ -1659,23 +1745,29 @@ function bricksAdminTemplateExclusion() {
 	const searchWrapper = document.createElement('div')
 	searchWrapper.className = 'searchable-wrapper'
 	searchWrapper.innerHTML = `
-		<input class="searchable" type="text" spellcheck="false" placeholder="${
-			window.bricksData?.i18n?.searchTemplates || 'Add / Search for ..'
-		}">
+		<input class="searchable" type="text" spellcheck="false" placeholder="${config.searchPlaceholder}">
+		<span class="search-status"></span>
 	`
 
 	// Create dropdown list
 	const dropdown = document.createElement('ul')
 	dropdown.className = 'dropdown'
 
-	// Add options to dropdown
-	Array.from(select.options).forEach((option, index) => {
-		const li = document.createElement('li')
-		li.setAttribute('data-index', index)
-		li.className = option.selected ? 'selected' : ''
-		li.innerHTML = `<span>${option.text}</span>`
-		dropdown.appendChild(li)
-	})
+	// Add options to dropdown (initial load)
+	if (!config.ajaxSearch) {
+		populateDropdownFromSelect()
+	} else {
+		// For AJAX search, only add the selected options initially
+		populateDropdownFromSelectedOptions()
+
+		// Add a message for initial state
+		if (Array.from(select.selectedOptions).length === 0) {
+			const initialMessage = document.createElement('li')
+			initialMessage.className = 'message'
+			initialMessage.innerHTML = `<span>${window.bricksData?.i18n?.typeToSearch}</span>`
+			dropdown.appendChild(initialMessage)
+		}
+	}
 
 	// Build structure
 	optionsWrapper.appendChild(searchWrapper)
@@ -1686,6 +1778,32 @@ function bricksAdminTemplateExclusion() {
 	// Hide original select
 	select.style.display = 'none'
 	select.after(control)
+
+	// Function to populate dropdown from select options
+	function populateDropdownFromSelect() {
+		dropdown.innerHTML = ''
+		Array.from(select.options).forEach((option, index) => {
+			const li = document.createElement('li')
+			li.setAttribute('data-index', index)
+			li.setAttribute('data-value', option.value)
+			li.className = option.selected ? 'selected' : ''
+			li.innerHTML = `<span>${option.text}</span>`
+			dropdown.appendChild(li)
+		})
+	}
+
+	// Function to populate dropdown from selected options only
+	function populateDropdownFromSelectedOptions() {
+		dropdown.innerHTML = ''
+		Array.from(select.selectedOptions).forEach((option, index) => {
+			const li = document.createElement('li')
+			li.setAttribute('data-index', index)
+			li.setAttribute('data-value', option.value)
+			li.className = 'selected'
+			li.innerHTML = `<span>${option.text}</span>`
+			dropdown.appendChild(li)
+		})
+	}
 
 	// Update selected items display
 	const updateSelection = () => {
@@ -1700,7 +1818,7 @@ function bricksAdminTemplateExclusion() {
 			selected.forEach((option) => {
 				const value = document.createElement('span')
 				value.className = 'value'
-				value.setAttribute('data-template-id', option.value)
+				value.setAttribute(config.dataAttribute, option.value)
 				value.innerHTML = `
 					${option.text}
 					<span class="dashicons dashicons-no-alt" data-name="close-box"></span>
@@ -1709,9 +1827,7 @@ function bricksAdminTemplateExclusion() {
 			})
 		} else {
 			input.innerHTML = `
-				<span class="placeholder">${
-					window.bricksData?.i18n?.selectTemplates || 'Select templates...'
-				}</span>
+				<span class="placeholder">${config.placeholder}</span>
 				<span class="dashicons dashicons-arrow-down"></span>
 			`
 		}
@@ -1725,18 +1841,31 @@ function bricksAdminTemplateExclusion() {
 		const isSearchInput = e.target.classList.contains('searchable')
 		if (!isSearchInput) {
 			control.classList.toggle('open')
+
+			// Auto-focus search input when dropdown opens
+			if (control.classList.contains('open')) {
+				const searchInput = control.querySelector('.searchable')
+				if (searchInput) {
+					setTimeout(() => {
+						searchInput.focus()
+					}, 10)
+				}
+			}
 		}
 	})
 
 	// Handle option selection
 	dropdown.addEventListener('click', (e) => {
 		const li = e.target.closest('li')
-		if (li) {
-			const index = li.dataset.index
-			const option = select.options[index]
-			option.selected = !option.selected
-			li.classList.toggle('selected')
-			updateSelection()
+		if (li && !li.classList.contains('message') && !li.classList.contains('loading')) {
+			const value = li.getAttribute('data-value')
+			const option = select.querySelector(`option[value="${value}"]`)
+
+			if (option) {
+				option.selected = !option.selected
+				li.classList.toggle('selected')
+				updateSelection()
+			}
 		}
 	})
 
@@ -1746,26 +1875,190 @@ function bricksAdminTemplateExclusion() {
 		if (closeBox) {
 			e.stopPropagation()
 			const tag = closeBox.closest('.value')
-			const templateId = tag.getAttribute('data-template-id')
-			const option = select.querySelector(`option[value="${templateId}"]`)
+			const itemId = tag.getAttribute(config.dataAttribute)
+			const option = select.querySelector(`option[value="${itemId}"]`)
 			if (option) {
 				option.selected = false
-				dropdown
-					.querySelector(`li[data-index="${Array.from(select.options).indexOf(option)}"]`)
-					.classList.remove('selected')
+				const li = dropdown.querySelector(`li[data-value="${itemId}"]`)
+				if (li) {
+					li.classList.remove('selected')
+				}
 				updateSelection()
 			}
 		}
 	})
 
+	// Debounce function for search
+	function debounce(func, wait) {
+		let timeout
+		return function (...args) {
+			const context = this
+			clearTimeout(timeout)
+			timeout = setTimeout(() => func.apply(context, args), wait)
+		}
+	}
+
+	// AJAX search function
+	function performAjaxSearch(searchTerm) {
+		const searchStatus = searchWrapper.querySelector('.search-status')
+		searchStatus.textContent = window.bricksData?.i18n?.searching
+		searchStatus.classList.add('active')
+
+		// Show loading indicator in dropdown
+		const loadingItem = document.createElement('li')
+		loadingItem.className = 'loading'
+		loadingItem.innerHTML = `<span>${window.bricksData?.i18n?.searching}</span>`
+
+		// Clear previous results but keep selected items
+		const selectedItems = Array.from(dropdown.querySelectorAll('li.selected'))
+		dropdown.innerHTML = ''
+		selectedItems.forEach((item) => dropdown.appendChild(item))
+		dropdown.appendChild(loadingItem)
+
+		// Prepare AJAX data
+		const data = {
+			action: config.ajaxOptions.action,
+			search: searchTerm,
+			...config.ajaxOptions.params
+		}
+
+		// Add nonce if available
+		if (window.bricksData?.nonce) {
+			data.nonce = window.bricksData.nonce
+		}
+
+		// Perform AJAX request
+		jQuery.ajax({
+			type: 'GET',
+			url: window.bricksData?.ajaxUrl,
+			data: data,
+			success: function (response) {
+				// Remove loading indicator
+				const loadingItems = dropdown.querySelectorAll('li.loading')
+				loadingItems.forEach((item) => item.remove())
+
+				// Update search status
+				searchStatus.textContent = ''
+				searchStatus.classList.remove('active')
+
+				if (response.success && response.data) {
+					// Get currently selected values
+					const selectedValues = Array.from(select.selectedOptions).map((opt) => opt.value)
+
+					// Add new options to select if they don't exist
+					Object.entries(response.data).forEach(([id, title]) => {
+						if (!select.querySelector(`option[value="${id}"]`)) {
+							const newOption = document.createElement('option')
+							newOption.value = id
+							newOption.text = title
+							newOption.selected = selectedValues.includes(id)
+							select.appendChild(newOption)
+						}
+					})
+
+					// Clear dropdown except selected items
+					const selectedItems = Array.from(dropdown.querySelectorAll('li.selected'))
+					dropdown.innerHTML = ''
+					selectedItems.forEach((item) => dropdown.appendChild(item))
+
+					// Add results to dropdown
+					Object.entries(response.data).forEach(([id, title]) => {
+						// Skip if already in dropdown (selected)
+						if (dropdown.querySelector(`li[data-value="${id}"]`)) {
+							return
+						}
+
+						const li = document.createElement('li')
+						li.setAttribute('data-value', id)
+						li.className = selectedValues.includes(id) ? 'selected' : ''
+						li.innerHTML = `<span>${title}</span>`
+						dropdown.appendChild(li)
+					})
+
+					// Show no results message if empty
+					if (dropdown.children.length === 0) {
+						const noResults = document.createElement('li')
+						noResults.className = 'message'
+						noResults.innerHTML = `<span>${window.bricksData?.i18n?.noResults}</span>`
+						dropdown.appendChild(noResults)
+					}
+				} else {
+					// Show error message
+					const errorItem = document.createElement('li')
+					errorItem.className = 'message error'
+					errorItem.innerHTML = `<span>${window.bricksData?.i18n?.searchError}</span>`
+					dropdown.appendChild(errorItem)
+				}
+			},
+			error: function () {
+				// Remove loading indicator
+				const loadingItems = dropdown.querySelectorAll('li.loading')
+				loadingItems.forEach((item) => item.remove())
+
+				// Update search status
+				searchStatus.textContent = ''
+				searchStatus.classList.remove('active')
+
+				// Show error message
+				const errorItem = document.createElement('li')
+				errorItem.className = 'message error'
+				errorItem.innerHTML = `<span>${window.bricksData?.i18n?.searchError}</span>`
+				dropdown.appendChild(errorItem)
+			}
+		})
+	}
+
+	// Debounced search function
+	const debouncedSearch = debounce(function (searchTerm) {
+		performAjaxSearch(searchTerm)
+	}, config.ajaxOptions.debounceTime)
+
 	// Handle search
 	const searchInput = searchWrapper.querySelector('.searchable')
 	searchInput.addEventListener('input', (e) => {
 		const search = e.target.value.toLowerCase()
-		Array.from(dropdown.children).forEach((li) => {
-			const text = li.textContent.toLowerCase()
-			li.style.display = text.includes(search) ? '' : 'none'
-		})
+
+		if (config.ajaxSearch) {
+			// Clear message when user starts typing
+			const messageItems = dropdown.querySelectorAll('li.message')
+			messageItems.forEach((item) => item.remove())
+
+			// If search is empty, show only selected items
+			if (search === '') {
+				populateDropdownFromSelectedOptions()
+
+				// Add a message for empty search
+				if (dropdown.children.length === 0) {
+					const initialMessage = document.createElement('li')
+					initialMessage.className = 'message'
+					initialMessage.innerHTML = `<span>${window.bricksData?.i18n?.typeToSearch}</span>`
+					dropdown.appendChild(initialMessage)
+				}
+				return
+			}
+
+			// Check if search meets minimum length requirement
+			if (search.length >= config.ajaxOptions.minSearchLength) {
+				debouncedSearch(search)
+			} else if (search.length > 0) {
+				// Show message about minimum length
+				const minLengthMessage = document.createElement('li')
+				minLengthMessage.className = 'message'
+				minLengthMessage.innerHTML = `<span>${window.bricksData?.i18n?.minSearchLength}</span>`
+
+				// Clear dropdown except selected items
+				const selectedItems = Array.from(dropdown.querySelectorAll('li.selected'))
+				dropdown.innerHTML = ''
+				selectedItems.forEach((item) => dropdown.appendChild(item))
+				dropdown.appendChild(minLengthMessage)
+			}
+		} else {
+			// Regular filtering for non-AJAX search
+			Array.from(dropdown.children).forEach((li) => {
+				const text = li.textContent.toLowerCase()
+				li.style.display = text.includes(search) ? '' : 'none'
+			})
+		}
 	})
 
 	// Close dropdown when clicking outside
@@ -1774,6 +2067,1451 @@ function bricksAdminTemplateExclusion() {
 			control.classList.remove('open')
 		}
 	})
+}
+
+/**
+ * Element manager: Bricks > Elements
+ *
+ * @since 2.0
+ */
+function bricksElementManger() {
+	let elementManagerForm = document.getElementById('bricks-element-manager')
+
+	if (!elementManagerForm) {
+		return
+	}
+
+	elementFilters = document.querySelectorAll('button[data-filter-by]')
+
+	// STEP: Filter elements
+	elementFilters.forEach((filter) => {
+		filter.addEventListener('click', function (e) {
+			e.preventDefault()
+
+			let filterActive = e.target.classList.contains('active')
+			let filterBy = filter.dataset.filterBy
+			let iconNode = e.target.querySelector('i')
+
+			// Toggle icon
+			if (iconNode) {
+				if (filterActive) {
+					iconNode.classList.remove('dashicons-remove')
+					iconNode.classList.add('dashicons-insert')
+				} else {
+					iconNode.classList.remove('dashicons-insert')
+					iconNode.classList.add('dashicons-remove')
+				}
+			}
+
+			// Toggle button
+			if (filterActive) {
+				filter.classList.remove('button-primary')
+				filter.classList.add('button-scondary')
+			} else {
+				filter.classList.remove('button-secondary')
+				filter.classList.add('button-primary')
+			}
+
+			// Apply/remove filter via #bricks-element-manager attributes
+			if (filterActive) {
+				if (filterBy === 'unused') {
+					delete elementManagerForm.dataset.filterUnused
+				}
+
+				if (filterBy === 'native') {
+					delete elementManagerForm.dataset.filterNative
+				}
+
+				if (filterBy === 'custom') {
+					delete elementManagerForm.dataset.filterCustom
+				}
+			} else {
+				if (filterBy === 'unused') {
+					elementManagerForm.dataset.filterUnused = 'on'
+				}
+
+				if (filterBy === 'native') {
+					elementManagerForm.dataset.filterNative = 'on'
+				}
+
+				if (filterBy === 'custom') {
+					elementManagerForm.dataset.filterCustom = 'on'
+				}
+			}
+
+			filter.classList.toggle('active')
+		})
+	})
+
+	elementManagerForm.addEventListener('click', function (e) {
+		// STEP: Update element status changes
+		let elementStatus = e.target.dataset.status
+		if (elementStatus) {
+			// Add .sticky class to .submit-wrapper
+			let submitWrapper = elementManagerForm.querySelector('.submit-wrapper')
+			if (submitWrapper) {
+				submitWrapper.classList.add('sticky')
+			}
+
+			// Remove 'current' class from buttons
+			Array.from(e.target.parentNode.children).forEach((child) => {
+				child.classList.remove('current')
+			})
+
+			e.target.classList.add('current')
+
+			let tableRow = e.target.closest('tr')
+			if (tableRow) {
+				tableRow.dataset.status = e.target.dataset.status
+			}
+		}
+
+		// STEP: Update element permission changes
+		let elementPermission = e.target.closest('.element-permission input')
+		if (elementPermission) {
+			// Toggle all other inputs in the same row if input value is 'all'
+			if (elementPermission.value === 'all') {
+				let row = elementPermission.closest('tr')
+				let inputs = row.querySelectorAll('.element-permission input')
+
+				inputs.forEach((input) => {
+					if (input.value !== 'all') {
+						input.checked = elementPermission.checked
+					}
+				})
+			}
+
+			// Non-all input toggled
+			else {
+				// Uncheck 'all' input if any other input is unchecked
+				if (!elementPermission.checked) {
+					let row = elementPermission.closest('tr')
+					let allInput = row.querySelector('.element-permission input[value="all"]')
+					if (allInput) {
+						allInput.checked = false
+					}
+				}
+
+				// Check 'all' input if all other inputs are checked
+				else {
+					let row = elementPermission.closest('tr')
+					let inputs = row.querySelectorAll('.element-permission input')
+					let allChecked = true
+
+					inputs.forEach((input) => {
+						if (input.value !== 'all' && !input.checked) {
+							allChecked = false
+						}
+					})
+
+					if (allChecked) {
+						let allInput = row.querySelector('.element-permission input[value="all"]')
+						if (allInput) {
+							allInput.checked = true
+						}
+					}
+				}
+			}
+		}
+	})
+
+	// STEP: Submit element manager form
+	elementManagerForm.addEventListener('submit', function (e) {
+		e.preventDefault()
+
+		let elements = {}
+
+		// Get all element name & status from table rows
+		let tableRows = elementManagerForm.querySelectorAll('tbody tr')
+		tableRows.forEach((row) => {
+			let elementName = row.dataset.name
+			let elementStatus = row.dataset.status
+
+			elements[elementName] = { status: elementStatus, permission: [] }
+
+			// Get all checked input values inside .element-permission (NOTE: Not in use yet)
+			let permissions = row.querySelectorAll('.element-permission input:checked')
+			permissions.forEach((permission) => {
+				elements[elementName].permission.push(permission.value)
+			})
+		})
+
+		let resetElementManager = document.activeElement.getAttribute('name') === 'reset'
+
+		if (resetElementManager) {
+			let letsReset = confirm('Are you sure you want to reset the element manager?')
+
+			if (!letsReset) {
+				return
+			}
+		}
+
+		jQuery.ajax({
+			type: 'POST',
+			url: bricksData.ajaxUrl,
+			data: {
+				action: 'bricks_save_element_manager',
+				elements: elements,
+				nonce: bricksData.nonce,
+				reset: resetElementManager
+			},
+			beforeSend: () => {
+				elementManagerForm.classList.add('wait')
+			},
+			success: function () {
+				elementManagerForm.classList.remove('wait')
+
+				if (resetElementManager) {
+					alert('Element manager has been reset.')
+					location.reload()
+				} else {
+					alert('Element manager has been saved.')
+
+					// Remove .sticky class from .submit-wrapper
+					let submitWrapper = elementManagerForm.querySelector('.submit-wrapper')
+					if (submitWrapper) {
+						submitWrapper.classList.remove('sticky')
+					}
+				}
+			}
+		})
+	})
+}
+
+function bricksAdminElementManagerUsage() {
+	// Only run on the element manager page
+	if (!document.getElementById('bricks-element-manager')) {
+		return
+	}
+
+	// Process elements in batches to avoid overwhelming the server
+	const BATCH_SIZE = 25
+	let elementsToProcess = []
+	let processingElements = false
+
+	// Get all elements that need their usage count fetched
+	document.querySelectorAll('.element-usage').forEach((cell) => {
+		const elementName = cell.dataset.elementName
+		if (elementName) {
+			elementsToProcess.push(elementName)
+		}
+	})
+
+	// Process elements in batches of 25
+	function processNextBatch() {
+		if (processingElements || elementsToProcess.length === 0) {
+			return
+		}
+
+		processingElements = true
+
+		// Get the next batch of elements
+		const batch = elementsToProcess.splice(0, BATCH_SIZE)
+
+		getElementUsageCount(batch)
+
+		// Process the next batch
+		setTimeout(() => {
+			processingElements = false
+			processNextBatch()
+		}, 200)
+	}
+
+	// Get the usage count for a specific element
+	function getElementUsageCount(elementNames) {
+		const formData = new FormData()
+		formData.append('action', 'bricks_get_element_usage_count')
+		formData.append('nonce', bricksData.nonce)
+		formData.append('elementNames', elementNames)
+
+		jQuery.ajax({
+			type: 'POST',
+			url: bricksData.ajaxUrl,
+			data: {
+				action: 'bricks_get_element_usage_count',
+				nonce: bricksData.nonce,
+				elementNames: elementNames
+			},
+			success: function (response) {
+				const countByElementName = response.data?.results || {}
+				elementNames.forEach((elementName) => {
+					const cell = document.querySelector(`.element-usage[data-element-name="${elementName}"]`)
+					if (cell) {
+						cell.innerHTML = countByElementName[elementName]?.count || '-'
+
+						// Element count as data-count attribute for unused elements filter
+						cell
+							.closest('tr')
+							.setAttribute('data-count', countByElementName[elementName]?.count || 0)
+					}
+				})
+			}
+		})
+	}
+
+	// Start processing elements
+	processNextBatch()
+}
+
+/**
+ * Handle custom capabilities UI
+ */
+function bricksAdminCustomCapabilities() {
+	const wrapper = document.querySelector('.bricks-custom-capabilities-wrapper')
+	if (!wrapper) {
+		return
+	}
+
+	// Initialize variables
+	const addCapabilityButton = wrapper.querySelector('.new-capability')
+	const capabilitiesList = wrapper.querySelector('.bricks-custom-capabilities-list')
+	const customCapabilitiesInput = wrapper.querySelector('input[name="customCapabilities"]')
+	let capabilities = []
+
+	// Parse capabilities from hidden input
+	if (customCapabilitiesInput && customCapabilitiesInput.value) {
+		try {
+			capabilities = JSON.parse(customCapabilitiesInput.value)
+		} catch (e) {
+			console.error('Error parsing capabilities:', e)
+		}
+	}
+
+	// Function to check if any access builder permissions are selected
+	function hasAccessBuilderPermissions(modal) {
+		const accessBuilderSection = modal.querySelector(
+			'.permission-section[data-section="access_builder"]'
+		)
+		if (!accessBuilderSection) return false
+
+		const accessBuilderCheckboxes = accessBuilderSection.querySelectorAll(
+			'input[type="checkbox"][name="permissions[]"]'
+		)
+		return Array.from(accessBuilderCheckboxes).some((checkbox) => checkbox.checked)
+	}
+
+	// Function to toggle all non-access-builder checkboxes
+	function toggleNonAccessBuilderCheckboxes(modal, enable) {
+		const allSections = modal.querySelectorAll('.permission-section')
+		allSections.forEach((section) => {
+			if (section.dataset.section === 'access_builder') return
+
+			const checkboxes = section.querySelectorAll('input[type="checkbox"][name="permissions[]"]')
+			const enableAllCheckbox = section.querySelector('.enable-all-checkbox')
+
+			checkboxes.forEach((checkbox) => {
+				checkbox.disabled = !enable
+				if (!enable) {
+					checkbox.checked = false
+				}
+			})
+
+			// Update the "Enable All" checkbox state after toggling
+			if (enableAllCheckbox) {
+				enableAllCheckbox.disabled = !enable
+				enableAllCheckbox.checked =
+					enable && Array.from(checkboxes).every((checkbox) => checkbox.checked)
+			}
+		})
+	}
+
+	// Function to update the hidden input with current capabilities
+	function updateCapabilitiesInput() {
+		if (customCapabilitiesInput) {
+			customCapabilitiesInput.value = JSON.stringify(capabilities)
+		}
+	}
+
+	// Function to render capabilities in the list
+	function renderCapabilities() {
+		// Clear the list first
+		capabilitiesList.innerHTML = ''
+
+		// First render default capabilities
+		if (window.bricksData.defaultCapabilities) {
+			capabilitiesList.innerHTML += `<div class="sub">${window.bricksData.i18n.defaultCapabilities}</div>`
+			Object.entries(window.bricksData.defaultCapabilities).forEach(([capId, capLabel]) => {
+				const capabilityItem = document.createElement('div')
+				capabilityItem.className = 'capability-item'
+				capabilityItem.dataset.capability = capId
+				capabilityItem.dataset.isDefault = 'true'
+
+				capabilityItem.innerHTML = `
+					<div class="capability-header">
+						<div class="capability-name">${capLabel} <em>(${window.bricksData.i18n.default})</em></div>
+						<div class="capability-actions">
+							<button type="button" class="button view-capability">
+								${window.bricksData.i18n.view}
+							</button>
+						</div>
+					</div>
+				`
+
+				capabilitiesList.appendChild(capabilityItem)
+			})
+		}
+
+		if (capabilities.length) {
+			let hr = document.createElement('hr')
+			hr.className = 'capabilities-separator'
+			capabilitiesList.appendChild(hr)
+
+			capabilitiesList.innerHTML += `<div class="sub">${window.bricksData.i18n.customCapabilities}</div>`
+			capabilitiesList.innerHTML += `<div class="description">${window.bricksData.i18n.customCapabilitiesDescription}</div>`
+		}
+
+		// Then render custom capabilities
+		capabilities.forEach((capability) => {
+			const capabilityItem = document.createElement('div')
+			capabilityItem.className = 'capability-item'
+			capabilityItem.dataset.capability = capability.id
+
+			capabilityItem.innerHTML = `
+				<div class="capability-header">
+					<div class="capability-name">${capability.label}</div>
+					<div class="capability-actions">
+						<button type="button" class="button edit-capability">
+							${window.bricksData.i18n.edit}
+						</button>
+						<button type="button" class="button duplicate-capability">
+						${window.bricksData.i18n.duplicate}
+						</button>
+						<button type="button" class="button delete-capability">
+						${window.bricksData.i18n.delete}
+						</button>
+					</div>
+				</div>
+			`
+
+			capabilitiesList.appendChild(capabilityItem)
+		})
+	}
+
+	// Function to close the modal
+	function closeModal() {
+		const modal = document.querySelector('.bricks-capability-modal')
+		const backdrop = document.querySelector('.bricks-capability-modal-backdrop')
+		if (modal) modal.remove()
+		if (backdrop) backdrop.remove()
+	}
+
+	// Function to save capability changes
+	function saveCapabilityChanges(modal, capabilityId) {
+		const nameInput = modal.querySelector('input[name="capability-name"]')
+		const descriptionInput = modal.querySelector('textarea[name="capability-description"]')
+		const checkboxes = modal.querySelectorAll('input[type="checkbox"][name="permissions[]"]')
+		const nameError = modal.querySelector('.capability-name-error')
+
+		// Validate capability name
+		const label = nameInput.value.trim()
+		const description = descriptionInput.value.trim()
+
+		if (!label) {
+			nameError.textContent = window.bricksData.i18n.capabilityNameRequired
+			nameInput.classList.add('error')
+			return false
+		}
+
+		// Check if name is a default capability
+		if (
+			window.bricksData.defaultCapabilities &&
+			Object.keys(window.bricksData.defaultCapabilities).includes(capabilityId) &&
+			(!capabilityId || label !== capabilityId)
+		) {
+			nameError.textContent = window.bricksData.i18n.capabilityNameReserved
+			nameInput.classList.add('error')
+			return false
+		}
+
+		// Check if name already exists
+		const nameExists = capabilities.some(
+			(cap) => cap.id === label && (!capabilityId || label !== capabilityId)
+		)
+		if (nameExists) {
+			nameError.textContent = window.bricksData.i18n.capabilityNameExists
+			nameInput.classList.add('error')
+			return false
+		}
+
+		// Get selected permissions
+		const selectedPermissions = []
+		checkboxes.forEach((checkbox) => {
+			if (checkbox.checked) {
+				selectedPermissions.push(checkbox.value)
+			}
+		})
+
+		// Update or add capability
+		if (capabilityId) {
+			// Update existing capability
+			const index = capabilities.findIndex((cap) => cap.id === capabilityId)
+			if (index !== -1) {
+				// Update builder access dropdowns if ID hasn't changed
+				if (label !== capabilities[index].label) {
+					// Update capability label in dropdowns
+					const builderAccessSelects = document.querySelectorAll(
+						'select[name^="builderCapabilities"]'
+					)
+					builderAccessSelects.forEach((select) => {
+						const option = Array.from(select.options).find(
+							(option) => option.value === capabilityId
+						)
+						if (option) {
+							option.textContent = label
+						}
+					})
+				}
+
+				capabilities[index] = {
+					id: capabilityId,
+					label: label,
+					description: description,
+					permissions: selectedPermissions
+				}
+			}
+		} else {
+			// Generate new unique ID for new capability
+			const newId = generateCapabilityId()
+
+			// Add new capability
+			capabilities.push({
+				id: newId,
+				label: label,
+				description: description,
+				permissions: selectedPermissions
+			})
+
+			// Add to builder access dropdowns
+			updateBuilderAccessDropdowns({
+				id: newId,
+				label: label
+			})
+		}
+
+		// Update hidden input
+		updateCapabilitiesInput()
+
+		// Render the updated capabilities list
+		renderCapabilities()
+
+		return true
+	}
+
+	// Function to show capability modal
+	function showCapabilityModal(capabilityId, isViewOnly) {
+		// Create modal HTML
+		const modalHTML = renderModalTemplate(capabilityId, isViewOnly)
+		document.body.insertAdjacentHTML('beforeend', modalHTML)
+
+		// Get modal elements
+		const modal = document.querySelector('.bricks-capability-modal')
+		const closeButtons = modal.querySelectorAll('.close-modal')
+		const nameInput = modal.querySelector('input[name="capability-name"]')
+		const checkboxes = modal.querySelectorAll('input[type="checkbox"][name="permissions[]"]')
+		const backdrop = document.querySelector('.bricks-capability-modal-backdrop')
+
+		// Close modal on any close button click
+		closeButtons.forEach((button) => {
+			button.addEventListener('click', () => {
+				if (!isViewOnly) {
+					saveCapabilityChanges(modal, capabilityId)
+				}
+				closeModal()
+			})
+		})
+
+		// Close on backdrop click
+		if (backdrop) {
+			backdrop.addEventListener('click', () => {
+				if (!isViewOnly) {
+					saveCapabilityChanges(modal, capabilityId)
+				}
+				closeModal()
+			})
+		}
+
+		// Close on ESC key
+		document.addEventListener('keydown', function escHandler(e) {
+			if (e.key === 'Escape') {
+				if (!isViewOnly) {
+					saveCapabilityChanges(modal, capabilityId)
+				}
+				closeModal()
+				document.removeEventListener('keydown', escHandler)
+			}
+		})
+
+		// Disable inputs for default capabilities or view mode
+		if (isViewOnly) {
+			if (nameInput) nameInput.disabled = true
+			checkboxes.forEach((checkbox) => {
+				checkbox.disabled = true
+			})
+		}
+
+		// Initial check for access builder permissions
+		if (!isViewOnly) {
+			const hasAccess = hasAccessBuilderPermissions(modal)
+			toggleNonAccessBuilderCheckboxes(modal, hasAccess)
+
+			// Add event listeners to access builder checkboxes
+			const accessBuilderSection = modal.querySelector(
+				'.permission-section[data-section="access_builder"]'
+			)
+			if (accessBuilderSection) {
+				const accessBuilderCheckboxes = accessBuilderSection.querySelectorAll(
+					'input[type="checkbox"][name="permissions[]"]'
+				)
+				accessBuilderCheckboxes.forEach((checkbox) => {
+					checkbox.addEventListener('change', () => {
+						const hasAccess = hasAccessBuilderPermissions(modal)
+						toggleNonAccessBuilderCheckboxes(modal, hasAccess)
+						saveCapabilityChanges(modal, capabilityId)
+					})
+				})
+			}
+		}
+
+		// Set initial state of "Enable All" checkboxes
+		if (!isViewOnly) {
+			// For each section, check if all permissions are already checked
+			modal.querySelectorAll('.permission-section').forEach((section) => {
+				const sectionCheckboxes = section.querySelectorAll(
+					'input[type="checkbox"][name="permissions[]"]'
+				)
+				const enableAllCheckbox = section.querySelector('.enable-all-checkbox')
+
+				// Set the "Enable All" checkbox state based on whether all permissions are checked
+				const allChecked = Array.from(sectionCheckboxes).every((checkbox) => checkbox.checked)
+				enableAllCheckbox.checked = allChecked
+
+				// Add event listener to "Enable All" checkbox
+				enableAllCheckbox.addEventListener('change', function () {
+					// Only allow enabling if this is the access_builder section or if access_builder permissions are selected
+					if (section.dataset.section !== 'access_builder' && !hasAccessBuilderPermissions(modal)) {
+						this.checked = false
+						return
+					}
+
+					const isChecked = this.checked
+					sectionCheckboxes.forEach((checkbox) => {
+						if (!checkbox.disabled) {
+							checkbox.checked = isChecked
+						}
+					})
+
+					// If this is the access_builder section, toggle other sections based on the checkbox state
+					if (section.dataset.section === 'access_builder') {
+						toggleNonAccessBuilderCheckboxes(modal, isChecked)
+					}
+
+					saveCapabilityChanges(modal, capabilityId)
+				})
+			})
+
+			// Update "Enable All" checkbox when individual permissions change
+			checkboxes.forEach((checkbox) => {
+				checkbox.addEventListener('change', function () {
+					const section = this.closest('.permission-section')
+					const sectionCheckboxes = section.querySelectorAll(
+						'input[type="checkbox"][name="permissions[]"]'
+					)
+					const enableAllCheckbox = section.querySelector('.enable-all-checkbox')
+
+					// Update "Enable All" checkbox based on whether all permissions are checked
+					const allChecked = Array.from(sectionCheckboxes).every(
+						(checkbox) => checkbox.checked || checkbox.disabled
+					)
+					enableAllCheckbox.checked = allChecked
+
+					// If this is a checkbox in the access_builder section, check if we need to enable other sections
+					if (section.dataset.section === 'access_builder') {
+						const hasAccess = hasAccessBuilderPermissions(modal)
+						toggleNonAccessBuilderCheckboxes(modal, hasAccess)
+					}
+
+					saveCapabilityChanges(modal, capabilityId)
+				})
+			})
+		}
+
+		// Handle name input validation and auto-save
+		if (nameInput && !isViewOnly) {
+			nameInput.addEventListener('input', function () {
+				const nameError = modal.querySelector('.capability-name-error')
+				nameInput.classList.remove('error')
+				nameError.textContent = ''
+				saveCapabilityChanges(modal, capabilityId)
+			})
+		}
+	}
+
+	// Function to render modal template
+	function renderModalTemplate(capabilityId, isViewOnly) {
+		// Get existing capability data or use empty defaults
+		let capability = { id: '', label: '', description: '', permissions: [] }
+
+		if (capabilityId) {
+			// Check if it's a default capability
+			if (
+				window.bricksData.defaultCapabilityPermissions &&
+				window.bricksData.defaultCapabilityPermissions[capabilityId]
+			) {
+				const defaultCapData = window.bricksData.defaultCapabilityPermissions[capabilityId]
+				capability = {
+					id: capabilityId,
+					label: defaultCapData.label,
+					permissions: defaultCapData.permissions || []
+				}
+			} else {
+				// Custom capability
+				const existingCapability = capabilities.find((cap) => cap.id === capabilityId)
+				if (existingCapability) {
+					capability = existingCapability
+				}
+			}
+		}
+
+		const isDefaultCapability = window.bricksData.defaultCapabilityPermissions?.[capabilityId]
+
+		return `
+		<div class="bricks-capability-modal">
+			<div class="bricks-capability-modal-header">
+				<h2>${
+					isViewOnly
+						? window.bricksData.i18n.view
+						: capability.id
+							? window.bricksData.i18n.editCapability
+							: window.bricksData.i18n.newCapability
+				}</h2>
+				<button type="button" class="close-modal">
+					<span class="dashicons dashicons-no-alt"></span>
+				</button>
+			</div>
+			<div class="bricks-capability-modal-content">
+				<div class="capability-name-wrapper">
+					<label for="capability-name">${window.bricksData.i18n.capabilityName}</label>
+					<span class="capability-id" title="${window.bricksData.i18n.capability}: ${
+						window.bricksData.i18n.capabilityKey
+					}">${capability.id}</span>
+					<input type="text" name="capability-name" id="capability-name" value="${capability.label}" ${
+						isViewOnly || isDefaultCapability ? 'disabled' : ''
+					}>
+					<div class="capability-name-error"></div>
+				</div>
+				${
+					!isDefaultCapability
+						? `
+				<div class="capability-description-wrapper">
+					<label for="capability-description">${window.bricksData.i18n.description}</label>
+					<textarea name="capability-description" id="capability-description" rows="3" ${
+						isViewOnly ? 'disabled' : ''
+					}>${capability.description || ''}</textarea>
+				</div>
+				`
+						: ''
+				}
+				<div class="capability-permissions">
+					${Object.entries(window.bricksData.builderAccessPermissions)
+						.map(
+							([sectionKey, section]) => `
+						<div class="permission-section" data-section="${sectionKey}">
+							<div class="section-header">
+								<h3>${section.label}</h3>
+								<label class="enable-all-wrapper">
+									<input type="checkbox" class="enable-all-checkbox" ${isViewOnly ? 'disabled' : ''}>
+									<span>${window.bricksData.i18n.enableAll}</span>
+								</label>
+								<div class="description">${section.description || ''}</div>
+							</div>
+							<div class="permission-grid">
+								${Object.entries(section.permissions)
+									.map(
+										([permissionId, permissionLabel]) => `
+									<label class="permission-item">
+										<input type="checkbox" name="permissions[]" value="${permissionId}" ${
+											capability.permissions.includes(permissionId) ? 'checked' : ''
+										} ${isViewOnly ? 'disabled' : ''}>
+										<span>${permissionLabel}</span>
+									</label>
+								`
+									)
+									.join('')}
+							</div>
+						</div>
+					`
+						)
+						.join('')}
+				</div>
+			</div>
+			<div class="bricks-capability-modal-footer">
+				<div class="save-reminder">${window.bricksData.i18n.saveSettingsToApplyChanges}</div>
+				<button type="button" class="button close-modal">${window.bricksData.i18n.close}</button>
+			</div>
+		</div>
+		<div class="bricks-capability-modal-backdrop"></div>
+		`
+	}
+
+	// Function to update builder access dropdowns with new capability
+	function updateBuilderAccessDropdowns(capability) {
+		// Find all builder access dropdowns
+		const builderAccessSelects = document.querySelectorAll('select[name^="builderCapabilities"]')
+
+		// Skip if no dropdowns found
+		if (!builderAccessSelects.length) {
+			return
+		}
+
+		// Create new option element
+		const newOption = document.createElement('option')
+		newOption.value = capability.id
+		newOption.textContent = capability.label
+
+		// Add the new option to each dropdown (before the "Full access" option)
+		builderAccessSelects.forEach((select) => {
+			// Skip the administrator role dropdown (it's disabled)
+			if (select.disabled) {
+				return
+			}
+
+			// Remove existing option if updating
+			const existingOption = select.querySelector(`option[value="${capability.id}"]`)
+			if (existingOption) {
+				existingOption.remove()
+			}
+
+			// Find the "Full access" option (it should be the last one)
+			const fullAccessOption = Array.from(select.options).find(
+				(option) => option.value === 'bricks_full_access'
+			)
+
+			// If found, insert before it; otherwise append to the end
+			if (fullAccessOption) {
+				select.insertBefore(newOption.cloneNode(true), fullAccessOption)
+			} else {
+				select.appendChild(newOption.cloneNode(true))
+			}
+		})
+	}
+
+	// Function to generate a random 6-character string
+	function generateRandomString(length = 6) {
+		return Math.random()
+			.toString(36)
+			.substring(2, 2 + length)
+	}
+
+	// Function to generate a unique capability ID
+	function generateCapabilityId() {
+		return `bricks_builder_access_${generateRandomString()}`
+	}
+
+	// Add new capability button
+	if (addCapabilityButton) {
+		addCapabilityButton.addEventListener('click', function () {
+			// Generate new capability with unique ID
+			const newCapability = {
+				id: generateCapabilityId(),
+				label: window.bricksData.i18n.newCapability,
+				permissions: []
+			}
+
+			// Add to capabilities array
+			capabilities.push(newCapability)
+
+			// Update hidden input
+			updateCapabilitiesInput()
+
+			// Add to builder access dropdowns
+			updateBuilderAccessDropdowns(newCapability)
+
+			// Update the UI
+			renderCapabilities()
+
+			// Show edit modal for the new capability
+			showCapabilityModal(newCapability.id)
+		})
+	}
+
+	// Function to update builder access dropdowns with capability
+	function updateBuilderAccessDropdowns(capability) {
+		// Find all builder access dropdowns
+		const builderAccessSelects = document.querySelectorAll('select[name^="builderCapabilities"]')
+
+		// Skip if no dropdowns found
+		if (!builderAccessSelects.length) {
+			return
+		}
+
+		// Create new option element
+		const newOption = document.createElement('option')
+		newOption.value = capability.id
+		newOption.textContent = capability.label
+
+		// Add the new option to each dropdown (before the "Full access" option)
+		builderAccessSelects.forEach((select) => {
+			// Skip the administrator role dropdown (it's disabled)
+			if (select.disabled) {
+				return
+			}
+
+			// Remove existing option if updating
+			const existingOption = select.querySelector(`option[value="${capability.id}"]`)
+			if (existingOption) {
+				existingOption.remove()
+			}
+
+			// Find the "Full access" option (it should be the last one)
+			const fullAccessOption = Array.from(select.options).find(
+				(option) => option.value === 'bricks_full_access'
+			)
+
+			// If found, insert before it; otherwise append to the end
+			if (fullAccessOption) {
+				select.insertBefore(newOption.cloneNode(true), fullAccessOption)
+			} else {
+				select.appendChild(newOption.cloneNode(true))
+			}
+		})
+	}
+
+	// Initial render of capabilities
+	renderCapabilities()
+
+	// Event delegation for capability items
+	if (capabilitiesList) {
+		capabilitiesList.addEventListener('click', function (e) {
+			const capabilityItem = e.target.closest('.capability-item')
+
+			if (!capabilityItem) {
+				return
+			}
+
+			const capabilityId = capabilityItem.dataset.capability
+
+			// View button (for default capabilities)
+			if (e.target.classList.contains('view-capability')) {
+				showCapabilityModal(capabilityId, true)
+			}
+
+			// Edit button (for custom capabilities)
+			else if (e.target.classList.contains('edit-capability')) {
+				showCapabilityModal(capabilityId)
+			}
+
+			// Duplicate button (for custom capabilities)
+			else if (
+				e.target.classList.contains('duplicate-capability') ||
+				e.target.closest('.duplicate-capability')
+			) {
+				// Find the capability to duplicate
+				const capability = capabilities.find((cap) => cap.id === capabilityId)
+				if (capability) {
+					// Generate new unique ID for duplicated capability
+					const newId = generateCapabilityId()
+
+					// Create new capability with duplicated data
+					const duplicatedCapability = {
+						id: newId,
+						label: `${capability.label} (${window.bricksData.i18n.duplicate})`,
+						description: capability.description || '',
+						permissions: [...capability.permissions]
+					}
+
+					// Add to capabilities array
+					capabilities.push(duplicatedCapability)
+
+					// Update hidden input
+					updateCapabilitiesInput()
+
+					// Add to builder access dropdowns
+					updateBuilderAccessDropdowns(duplicatedCapability)
+
+					// Update the UI
+					renderCapabilities()
+				}
+			}
+
+			// Delete button (for custom capabilities)
+			else if (
+				e.target.classList.contains('delete-capability') ||
+				e.target.closest('.delete-capability')
+			) {
+				const confirmed = confirm(window.bricksData.i18n.confirmDeleteCapability)
+				if (confirmed) {
+					// Remove from capabilities array
+					capabilities = capabilities.filter((cap) => cap.id !== capabilityId)
+
+					// Remove from builder access dropdowns
+					const builderAccessSelects = document.querySelectorAll(
+						'select[name^="builderCapabilities"]'
+					)
+					builderAccessSelects.forEach((select) => {
+						const option = select.querySelector(`option[value="${capabilityId}"]`)
+						if (option) {
+							option.remove()
+						}
+					})
+
+					// Update hidden input
+					updateCapabilitiesInput()
+
+					// Update the UI
+					renderCapabilities()
+				}
+			}
+		})
+	}
+}
+
+/**
+ * Template exclusion multiselect handler
+ *
+ * @since 1.12.2
+ */
+function bricksAdminTemplateExclusion() {
+	bricksCreateMultiselect('excludedTemplates', {
+		placeholder: window.bricksData?.i18n?.selectTemplates,
+		searchPlaceholder: window.bricksData?.i18n?.searchTemplates,
+		dataAttribute: 'data-template-id'
+	})
+}
+
+/**
+ * Maintenance mode excluded posts/pages multiselect handler
+ *
+ * @since 2.0
+ */
+function bricksAdminMaintenanceExcludedPosts() {
+	bricksCreateMultiselect('maintenanceExcludedPosts', {
+		placeholder: window.bricksData?.i18n?.selectPosts,
+		searchPlaceholder: window.bricksData?.i18n?.searchPosts,
+		dataAttribute: 'data-post-id',
+		ajaxSearch: true,
+		ajaxOptions: {
+			action: 'bricks_get_posts',
+			params: {
+				postType: 'any',
+				postStatus: 'publish',
+				excludePostTypes: ['bricks_template', 'attachment']
+			},
+			minSearchLength: 2,
+			debounceTime: 300
+		}
+	})
+}
+
+/**
+ * Handle attribute & term image swatch uploads
+ *
+ * @since 2.0
+ */
+function bricksAttributeImageSwatches() {
+	// Handle image upload
+	document.addEventListener('click', function (e) {
+		if (!e.target.matches('.bricks_swatch_image_upload')) return
+
+		e.preventDefault()
+
+		const button = e.target
+		const parent = button.parentNode
+		// Handle both term fields and attribute settings fields
+		const imageIdInput = parent.querySelector(
+			'input[name="swatch_image_value"], input[name="swatch_default_image"]'
+		)
+		const imagePreview = parent.querySelector('.swatch-image-preview')
+
+		let wp = window.wp
+
+		// Create media frame
+		if (!wp.media.frames.file_frame) {
+			wp.media.frames.file_frame = wp.media({
+				multiple: false
+			})
+		}
+
+		// When image selected
+		wp.media.frames.file_frame.off('select').on('select', function () {
+			const attachment = wp.media.frames.file_frame.state().get('selection').first().toJSON()
+
+			// Update hidden input with image ID
+			imageIdInput.value = attachment.id
+
+			// Update or create preview
+			if (imagePreview) {
+				imagePreview.src = attachment.url
+			} else {
+				const img = document.createElement('img')
+				img.src = attachment.url
+				img.className = 'swatch-image-preview'
+				img.style.cssText = 'max-width: 150px; display: block; margin-bottom: 8px;'
+				button.parentNode.insertBefore(img, button)
+			}
+
+			// Show remove button
+			button.nextElementSibling.style.display = ''
+		})
+
+		wp.media.frames.file_frame.open()
+	})
+
+	// Handle image removal
+	document.addEventListener('click', function (e) {
+		if (!e.target.matches('.bricks_swatch_image_remove')) return
+
+		e.preventDefault()
+
+		const button = e.target
+		const parent = button.parentNode
+		// Handle both term fields and attribute settings fields
+		const imageIdInput = parent.querySelector(
+			'input[name="swatch_image_value"], input[name="swatch_default_image"]'
+		)
+		const imagePreview = parent.querySelector('.swatch-image-preview')
+
+		// Clear input value
+		imageIdInput.value = ''
+
+		// Remove preview
+		if (imagePreview) {
+			imagePreview.remove()
+		}
+
+		// Hide remove button
+		button.style.display = 'none'
+	})
+}
+
+/**
+ * Handle color swatch removal
+ *
+ * @since 2.0
+ */
+function bricksAttributeColorSwatches() {
+	// Handle color swatch remove button
+	document.addEventListener('click', function (e) {
+		if (!e.target.matches('.bricks-remove-color')) {
+			return
+		}
+
+		e.preventDefault()
+		const inputId = e.target.dataset.input
+		const input = document.getElementById(inputId)
+		const wrapper = input.closest('.bricks-color-swatch-wrapper')
+
+		// Replace color input with Select Color button
+		wrapper.innerHTML = `
+			<div style="display: inline-block">
+				<button type="button" class="button show-color-picker" data-input-id="${inputId}">
+					${window.bricksData.i18n.selectColor}
+				</button>
+				<input type="hidden" name="${input.name}" id="${inputId}" value="none">
+			</div>
+		`
+	})
+
+	// Handle show color picker button
+	document.addEventListener('click', function (e) {
+		if (!e.target.matches('.show-color-picker')) {
+			return
+		}
+
+		const inputId = e.target.dataset.inputId
+		const wrapper = e.target.closest('div')
+		const inputName =
+			inputId === 'swatch_default_color' ? 'swatch_default_color' : 'swatch_color_value'
+
+		// Replace button with color input and add wrapper with positioning context
+		wrapper.outerHTML = `
+			<div class="bricks-color-input-wrapper" style="position: relative; display: inline-block;">
+				<input type="color" name="${inputName}" id="${inputId}" class="bricks-color-input">
+				<button type="button" class="button bricks-remove-color" data-input="${inputId}">
+					${window.bricksData.i18n.remove}
+				</button>
+			</div>
+		`
+
+		// After creating the color input, open the color picker at the click position
+		const colorInput = document.getElementById(inputId)
+
+		// If not using our custom picker, use the native one
+		if (!openColorPicker(e, colorInput)) {
+			// For non-Chrome browsers, just focus and click the input directly
+			colorInput.focus()
+			setTimeout(() => {
+				colorInput.click()
+			}, 10)
+		}
+	})
+
+	// Fix Chrome color picker positioning by using a custom approach
+	document.addEventListener('click', function (e) {
+		if (!e.target.matches('input[type="color"].bricks-color-input')) {
+			return
+		}
+
+		// Use our custom color picker for Chrome
+		openColorPicker(e, e.target)
+	})
+
+	// Create and open a properly positioned color picker
+	// NOTE: This is a workaround to fix the color picker positioning issue in Chrome which automatically opens the picker at the top left of the page
+	const openColorPicker = (e, targetInput) => {
+		// If we're in Chrome, use our custom color picker positioning
+		if (navigator.userAgent.indexOf('Chrome') !== -1) {
+			// Get the current color value
+			const currentColor = targetInput.value || '#ffffff'
+
+			// Create a custom positioned color input just for picking
+			const tempInput = document.createElement('input')
+			tempInput.type = 'color'
+			tempInput.value = currentColor
+			tempInput.style.position = 'absolute'
+			tempInput.style.left = e.pageX - 5 + 'px'
+			tempInput.style.top = e.pageY - 5 + 'px'
+			tempInput.style.padding = '0'
+			tempInput.style.margin = '0'
+			tempInput.style.width = '1px'
+			tempInput.style.height = '1px'
+			tempInput.style.opacity = '0.01'
+			tempInput.style.pointerEvents = 'none'
+			tempInput.style.zIndex = '999999'
+
+			// Listen for changes to our temporary input
+			tempInput.addEventListener('input', function () {
+				// Update the original input value
+				targetInput.value = tempInput.value
+			})
+
+			tempInput.addEventListener('change', function () {
+				// Once done, update original input and remove temp
+				targetInput.value = tempInput.value
+				document.body.removeChild(tempInput)
+			})
+
+			// Add to body, focus and click to open the picker
+			document.body.appendChild(tempInput)
+			tempInput.focus()
+			tempInput.click()
+			return true
+		}
+		return false
+	}
+}
+
+/**
+ * Handle attribute swatch type visibility
+ *
+ * @since 2.0
+ */
+function bricksAttributeSwatchTypeVisibility() {
+	const swatchType = document.getElementById('swatch_type')
+	const fallbacks = document.querySelectorAll('.bricks-swatch-fallback')
+
+	if (!swatchType) return
+
+	function updateVisibility() {
+		const type = swatchType.value
+
+		// Show/hide type-specific fallback
+		fallbacks.forEach((el) => {
+			el.style.display = 'none'
+		})
+
+		if (type) {
+			const fallbackField = document.querySelector('.bricks-swatch-fallback-' + type)
+			if (fallbackField) {
+				fallbackField.style.display = ''
+			}
+		}
+	}
+
+	swatchType.addEventListener('change', updateVisibility)
+	updateVisibility()
+}
+
+/**
+ * Clean up orphaned elements across site
+ *
+ * @since 2.0
+ */
+function bricksCleanupOrphanedElements() {
+	let button = document.getElementById('cleanup-all-orphaned-elements')
+
+	if (!button) {
+		return
+	}
+
+	button.addEventListener('click', function (e) {
+		e.preventDefault()
+
+		var confirmed = confirm(bricksData.i18n.confirmCleanupOrphanedElements)
+
+		if (!confirmed) {
+			return
+		}
+
+		jQuery.ajax({
+			type: 'POST',
+			url: bricksData.ajaxUrl,
+			data: {
+				action: 'bricks_cleanup_orphaned_elements',
+				nonce: bricksData.nonce
+			},
+			beforeSend: () => {
+				button.setAttribute('disabled', 'disabled')
+				button.classList.add('wait')
+			},
+			success: function (res) {
+				button.removeAttribute('disabled')
+				button.classList.remove('wait')
+
+				if (res.success) {
+					alert(res.data.message)
+					// Refresh the results or hide them since they're cleaned up
+					location.reload()
+				} else {
+					alert(res.data.message || bricksData.i18n.errorOccurred)
+				}
+			},
+			error: function () {
+				button.removeAttribute('disabled')
+				button.classList.remove('wait')
+				alert(bricksData.i18n.errorOccurredCleaningUpOrphanedElements)
+			}
+		})
+	})
+}
+
+/**
+ * Scan for orphaned elements across site
+ *
+ * @since 2.0
+ */
+function bricksScanOrphanedElements() {
+	let button = document.getElementById('scan-orphaned-elements')
+	let resultsContainer = document.getElementById('orphaned-elements-results')
+
+	if (!button || !resultsContainer) {
+		return
+	}
+
+	button.addEventListener('click', function (e) {
+		e.preventDefault()
+
+		jQuery.ajax({
+			type: 'POST',
+			url: window.bricksData.ajaxUrl,
+			data: {
+				action: 'bricks_scan_orphaned_elements',
+				nonce: window.bricksData.nonce
+			},
+			beforeSend: () => {
+				button.setAttribute('disabled', 'disabled')
+				button.classList.add('wait')
+			},
+			success: function (res) {
+				button.removeAttribute('disabled')
+				button.classList.remove('wait')
+
+				if (res.success) {
+					bricksDisplayOrphansScanResults(res.data, resultsContainer)
+				} else {
+					alert(res.data.message || window.bricksData.i18n.error)
+				}
+			},
+			error: function () {
+				button.removeAttribute('disabled')
+				button.classList.remove('wait')
+				alert(window.bricksData.i18n.errorOccurredScanningOrphanedElements)
+			}
+		})
+	})
+}
+
+/**
+ * Display scan results for orphaned elements
+ *
+ * @since 2.0
+ */
+function bricksDisplayOrphansScanResults(data, container) {
+	let html = ''
+
+	if (data.total_orphans === 0) {
+		html = '<div class="separator"></div>'
+		html +=
+			'<p class="message success"><strong>' +
+			window.bricksData.i18n.noOrphanedElementsFound +
+			'</strong></p>'
+	} else {
+		html = '<div class="separator"></div>'
+
+		// Use sprintf-like replacement for the message with placeholders
+		let errorMessage = window.bricksData.i18n.orphanedElementsFoundMessage
+			.replace('%1$d', data.total_orphans)
+			.replace('%2$d', data.total_posts)
+
+		html +=
+			'<h3 class="hero">' +
+			window.bricksData.i18n.results +
+			': ' +
+			window.bricksData.i18n.orphanedElementsReview +
+			'</h3>'
+
+		html += '<p class="message error"><strong>' + errorMessage + '</strong></p>'
+
+		html += '<div class="actions-wrapper" style="margin: 15px 0;">'
+		html +=
+			'<button type="button" id="cleanup-all-orphaned-elements" class="ajax button button-primary" style="margin-right: 10px;">'
+		html += '<span class="text">' + window.bricksData.i18n.cleanupAllOrphanedElements + '</span>'
+		html += '<span class="spinner is-active"></span>'
+		html += '<i class="dashicons dashicons-yes hide"></i>'
+		html += '</button>'
+		html += '</div>'
+
+		html += '<div class="orphaned-posts-list">'
+
+		html += '<ul>'
+
+		// Build the list of posts with orphaned elements
+		for (let postId in data.orphaned_by_post_id) {
+			let postData = data.orphaned_by_post_id[postId]
+			let permalink = postData.permalink
+			let editUrl
+
+			// Construct edit URL using permalink and builderParam (similar to getEditTemplateLink in PopupTemplates.vue)
+			if (permalink.indexOf('?') === -1) {
+				editUrl = `${permalink}?${window.bricksData.builderParam}=run`
+			} else {
+				editUrl = `${permalink}&${window.bricksData.builderParam}=run`
+			}
+
+			html += '<li>'
+			html += '<a href="' + editUrl + '" target="_blank">'
+			html += '<strong>' + postData.post_title + '</strong>'
+			html += '</a>'
+			html += ' - '
+			html += '<span style="color: #d63638;">'
+			html += window.bricksData.i18n.orphanedElementsCountMessage.replace(
+				'%d',
+				postData.total_orphans
+			)
+			html += '</span>'
+			html += '</li>'
+		}
+
+		html += '</ul>'
+		html += '</div>'
+	}
+
+	container.innerHTML = html
+	container.style.display = 'block'
+
+	// Initialize cleanup button if orphaned elements were found
+	if (data.total_orphans > 0) {
+		bricksCleanupOrphanedElements()
+	}
 }
 
 document.addEventListener('DOMContentLoaded', function (e) {
@@ -1787,6 +3525,9 @@ document.addEventListener('DOMContentLoaded', function (e) {
 	bricksAdminGenerateCssFiles()
 	bricksAdminCodeReview()
 	bricksAdminCodeReviewFilter()
+	bricksAdminCustomCapabilities()
+
+	bricksAdminGlobalElementsReview()
 
 	bricksTemplateShortcodeCopyToClipboard()
 
@@ -1805,6 +3546,9 @@ document.addEventListener('DOMContentLoaded', function (e) {
 	bricksFixElementDB()
 
 	bricksRegenerateCodeSignatures()
+	bricksCleanupOrphanedElements()
+	bricksScanOrphanedElements()
+	bricksAdminGlobalElementsReview()
 
 	bricksTemplateThumbnailAddScrollAnimation()
 
@@ -1813,6 +3557,14 @@ document.addEventListener('DOMContentLoaded', function (e) {
 	bricksAdminWooSettings()
 
 	bricksAdminTemplateExclusion()
+	bricksAdminMaintenanceExcludedPosts()
+
+	bricksElementManger()
+	bricksAdminElementManagerUsage()
+
+	bricksAttributeImageSwatches()
+	bricksAttributeColorSwatches()
+	bricksAttributeSwatchTypeVisibility()
 
 	// Move table navigation top & bottom outside of table container to make table horizontal scrollable
 	let tableContainer = document.querySelector('.wp-list-table-container')

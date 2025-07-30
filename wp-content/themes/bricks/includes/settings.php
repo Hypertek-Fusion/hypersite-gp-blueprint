@@ -15,7 +15,6 @@ class Settings {
 
 		add_action( 'wp', [ $this, 'set_controls' ] );
 
-		// Prevent errors on quick edit of templates (@since 1.5.6)
 		add_action( 'admin_init', [ $this, 'set_controls_in_admin' ] );
 	}
 

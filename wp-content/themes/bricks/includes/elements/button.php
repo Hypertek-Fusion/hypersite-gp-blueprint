@@ -182,7 +182,8 @@ class Element_Button extends Element {
 		}
 
 		if ( isset( $settings['text'] ) ) {
-			$output .= trim( $settings['text'] );
+			// Should render dynamic data for more accurate results like text-basic element (#86c3reqnt)
+			$output .= trim( $this->render_dynamic_data( $settings['text'] ) );
 		}
 
 		if ( $icon && $icon_position === 'right' ) {

@@ -5,6 +5,8 @@ if ( ! defined( 'ABSPATH' ) ) exit; // Exit if accessed directly
 
 class Elements {
 	public static $elements = [];
+	public static $manager  = []; // = Element Manager (@since 2.0)
+	public static $native   = []; // Use in Element Manager (@since 2.0)
 
 	public function __construct() {
 		// Init elements on init hook (to get custom registered taxonomies, etc.)
@@ -62,6 +64,7 @@ class Elements {
 			'tabs-nested', // @since 1.5
 			'form',
 			'map',
+			'map-connector', // @since 2.0
 			'alert',
 			'animated-typing',
 			'countdown',
@@ -129,18 +132,38 @@ class Elements {
 				'filter-search',
 				'filter-select',
 				'filter-submit',
-				'filter-active-filters', // @since 1.11
+				'filter-active-filters',
 			];
 
 			$element_names = array_merge( $element_names, $input_elements );
 		}
 
+		// Add element names to self::$native element names array (@since 2.0)
+		self::$native = array_merge( self::$native, $element_names );
+
 		$element_names = apply_filters( 'bricks/builder/elements', $element_names );
 
+		/**
+		 * Get element manager data
+		 *
+		 * Remove element if 'status' is 'disabled'
+		 *
+		 * @since 2.0
+		 */
+		self::$manager = get_option( BRICKS_DB_ELEMENT_MANAGER, [] );
+
 		foreach ( $element_names as $element_name ) {
+			// Skip if element is disabled and we aren't on the Bricks > Elements page (@since 2.0)
+			if ( isset( self::$manager[ $element_name ]['status'] ) && self::$manager[ $element_name ]['status'] === 'disabled' ) {
+				$page_name = $_GET['page'] ?? '';
+				if ( $page_name !== 'bricks-elements' ) {
+					continue;
+				}
+			}
+
 			$file = BRICKS_PATH . "includes/elements/$element_name.php";
 
-			// Construct element class name from element name (@since 1.4 avoids having to get all delared classes)
+			// Construct element class name from element name to avoid having to get all declared classes
 			$class_name = str_replace( '-', '_', $element_name );
 			$class_name = ucwords( $class_name, '_' );
 			$class_name = "Bricks\\Element_$class_name";

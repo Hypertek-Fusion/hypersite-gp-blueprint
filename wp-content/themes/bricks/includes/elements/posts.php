@@ -771,16 +771,20 @@ class Element_Posts extends Custom_Render_Element {
 
 		remove_filter( 'bricks/posts/query_vars', [ $this, 'maybe_set_preview_query' ], 10, 3 );
 
-		// No results: Empty by default (@since 1.4)
+		$no_result_content = '';
+
+		// No results
 		if ( ! $posts_query->found_posts ) {
-			// Insert Loop marker for the first loop item (@since 1.12.3)
-			if ( ! $is_load_more_request ) {
-				echo $query->get_loop_marker();
+			$no_result_content = $query->get_no_results_content();
+
+			// Wrap no result content in a list item to match Posts element output
+			$no_result_content = $this->no_results_html( $no_result_content );
+
+			// Early return if this is a load more request and query has no results
+			if ( $is_load_more_request ) {
+				echo $no_result_content;
+				return;
 			}
-
-			echo $query->get_no_results_content();
-
-			return;
 		}
 
 		$post_index = 0;
@@ -863,11 +867,6 @@ class Element_Posts extends Custom_Render_Element {
 			$image_atts['class'] .= ' bricks-lazy-load-isotope';
 		}
 
-		// Insert Loop marker for the first loop item (@since 1.12.3)
-		if ( ! $is_load_more_request ) {
-			echo $query->get_loop_marker();
-		}
-
 		$post_index = 0;
 
 		while ( $posts_query->have_posts() ) {
@@ -910,7 +909,14 @@ class Element_Posts extends Custom_Render_Element {
 				}
 			}
 
-			echo "<li {$this->render_attributes( "item-$post_index" )}>";
+			$first_node = "<li {$this->render_attributes( "item-$post_index" )}>";
+
+			// Insert Loop marker for the first loop item (@since 1.12.3)
+			if ( ! $is_load_more_request && $post_index === 0 ) {
+				$first_node = $query->maybe_add_loop_marker( $first_node );
+			}
+
+			echo $first_node;
 
 			if ( $link_post ) {
 				echo '<a href="' . get_the_permalink( $post->ID ) . '">';
@@ -1026,6 +1032,12 @@ class Element_Posts extends Custom_Render_Element {
 
 		wp_reset_postdata();
 
+		// No results content (Normal page load) (@since 2.0)
+		if ( $no_result_content !== '' ) {
+			// Add loop marker to no result content
+			echo $query->maybe_add_loop_marker( $no_result_content );
+		}
+
 		// Add infinite scroll information to isotope sizer
 		$this->render_query_loop_trail( $posts_query, 'item-sizer' );
 
@@ -1049,5 +1061,48 @@ class Element_Posts extends Custom_Render_Element {
 
 			echo '</div>';
 		}
+	}
+
+	/**
+	 * Modify the no results content to match the Posts element output
+	 *
+	 * @since 2.0
+	 */
+	public function no_results_html( $html ) {
+		if ( $html === '' ) {
+			return '';
+		}
+
+		$settings = $this->settings;
+		$layout   = $settings['layout'] ?? 'grid';
+
+		// Start building the output (provide bricks-posts-no-results class in case user wants to style it)
+		$output  = "<li class='bricks-layout-item repeater-item brxe-{$this->id} bricks-posts-no-results'>";
+		$output .= "<div class='bricks-layout-inner'>";
+
+		if ( $layout === 'metro' ) {
+			$output .= $this->build_metro_layout( $html );
+		} else {
+			$output .= $this->build_default_layout( $html );
+		}
+
+		$output .= '</div>';
+		$output .= '</li>';
+
+		return $output;
+	}
+
+	private function build_metro_layout( $html ) {
+		return "<figure class='image-wrapper'>
+			<div class='overlay-wrapper'>
+				<div class='overlay-inner'>
+					{$html}
+				</div>
+			</div>
+		</figure>";
+	}
+
+	private function build_default_layout( $html ) {
+		return "<div class='content-wrapper'>{$html}</div>";
 	}
 }

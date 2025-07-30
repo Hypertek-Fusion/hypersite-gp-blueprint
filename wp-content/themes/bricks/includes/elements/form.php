@@ -43,14 +43,8 @@ class Element_Form extends Element {
 					// Load datepicker localisation
 					$l10n = $field['l10n'] ?? '';
 					if ( $l10n ) {
-						/**
-						 * Set "version" (4.6.13) to null
-						 *
-						 * If version is present, we get a 302 redirect
-						 *
-						 * @since 1.12
-						 */
-						wp_enqueue_script( 'bricks-flatpickr-l10n', "https://npmcdn.com/flatpickr@4.6.13/dist/l10n/$l10n.js", [ 'bricks-flatpickr' ], null );
+						// Hosted locally (@since 2.0)
+						wp_enqueue_script( 'bricks-flatpickr-l10n', BRICKS_URL_ASSETS . "js/libs/flatpickr-l10n/$l10n.min.js", [ 'bricks-flatpickr' ], null );
 					}
 				}
 			}
@@ -77,6 +71,11 @@ class Element_Form extends Element {
 		$this->control_groups['email'] = [
 			'title'    => esc_html__( 'Email', 'bricks' ),
 			'required' => [ 'actions', '=', 'email' ],
+		];
+
+		$this->control_groups['webhook'] = [
+			'title'    => esc_html__( 'Webhook', 'bricks' ),
+			'required' => [ 'actions', '=', 'webhook' ],
 		];
 
 		$this->control_groups['confirmation'] = [
@@ -275,6 +274,13 @@ class Element_Form extends Element {
 					'required' => [ 'type', '=', [ 'number' ] ],
 				],
 
+				'step'                       => [
+					'label'    => esc_html__( 'Step', 'bricks' ),
+					'type'     => 'number',
+					'min'      => 0,
+					'required' => [ 'type', '=', [ 'number' ] ],
+				],
+
 				'label'                      => [
 					'label' => esc_html__( 'Label', 'bricks' ),
 					'type'  => 'text',
@@ -296,11 +302,17 @@ class Element_Form extends Element {
 					],
 				],
 
+				'minLength'                  => [
+					'label'    => esc_html__( 'Min. length', 'bricks' ),
+					'type'     => 'number',
+					'min'      => 0,
+					'required' => [ 'type', '=', [ 'email', 'number', 'text', 'tel', 'url', 'password', 'textarea' ] ],
+				],
+
 				'maxLength'                  => [
 					'label'    => esc_html__( 'Max. length', 'bricks' ),
 					'type'     => 'number',
 					'min'      => 0,
-					'info'     => esc_html__( 'Maximum characters allowed.', 'bricks' ),
 					'required' => [ 'type', '=', [ 'email', 'number', 'text', 'tel', 'url', 'password', 'textarea' ] ],
 				],
 
@@ -336,7 +348,7 @@ class Element_Form extends Element {
 					'info'     => 'on/off',
 					'required' => [
 						[ 'type', '=', [ 'text', 'textarea', 'email', 'number', 'password', 'tel', 'url' ] ],
-						[ 'isHoneypot', '!=', true ] // Honeypot fields will have autocomplete set to "nope" (@since 1.12.2)
+						[ 'isHoneypot', '!=', true ] // Honeypot fields will have autocomplete set to "off" (@since 1.12.2)
 					],
 				],
 
@@ -1175,6 +1187,99 @@ class Element_Form extends Element {
 			'default' => true,
 		];
 
+		// Group: Webhook (@since 2.0)
+		$this->controls['webhooks'] = [
+			'tab'           => 'content',
+			'group'         => 'webhook',
+			'type'          => 'repeater',
+			'label'         => esc_html__( 'Endpoints', 'bricks' ),
+			'placeholder'   => esc_html__( 'Endpoint', 'bricks' ),
+			'desc'          => esc_html__( 'The webhook endpoint(s) to send the submitted form data to.', 'bricks' ),
+			'titleProperty' => 'name',
+			'fields'        => [
+				'name'         => [
+					'label' => esc_html__( 'Name', 'bricks' ),
+					'type'  => 'text',
+				],
+				'url'          => [
+					'label'       => esc_html__( 'Endpoint URL', 'bricks' ),
+					'type'        => 'text',
+					'description' => esc_html__( 'The URL to send the form data to.', 'bricks' ),
+				],
+				'contentType'  => [
+					'label'       => esc_html__( 'Data format', 'bricks' ),
+					'type'        => 'select',
+					'options'     => [
+						'json'      => 'JSON',
+						'form-data' => esc_html__( 'Form data', 'bricks' ),
+					],
+					'default'     => 'json',
+					'placeholder' => 'JSON',
+					'description' => esc_html__( 'Format to send the data in.', 'bricks' ),
+				],
+				'dataTemplate' => [
+					'label'          => esc_html__( 'Data', 'bricks' ),
+					'type'           => 'code',
+					'hasDynamicData' => true,
+					'description'    => esc_html__( 'Customize how the data is structured. Leave empty to send all form fields.', 'bricks' ) . ' ' .
+								esc_html__( 'Example: {"name": "{{43f295}}", "email": "{{a5c626}}"}', 'bricks' ),
+				],
+				'headers'      => [
+					'label'          => esc_html__( 'Headers', 'bricks' ),
+					'type'           => 'code',
+					'hasDynamicData' => true,
+					'description'    => esc_html__( 'Add custom headers in JSON format. Leave empty for default headers.', 'bricks' ) . ' ' .
+								esc_html__( 'Example: {"Authorization": "Bearer token"}', 'bricks' ),
+				],
+			],
+		];
+
+		$this->controls['webhookMaxSize'] = [
+			'tab'         => 'content',
+			'group'       => 'webhook',
+			'label'       => esc_html__( 'Max payload size', 'bricks' ) . ' (KB)',
+			'type'        => 'number',
+			'placeholder' => '1024', // = Default: 1 MB
+			'min'         => 1,
+			'description' => esc_html__( 'Maximum size of the webhook payload in kilobytes.', 'bricks' ) . ' (' .
+								esc_html__( 'Default', 'bricks' ) . ': 1024)',
+		];
+
+		$this->controls['webhookRateLimit'] = [
+			'tab'         => 'content',
+			'group'       => 'webhook',
+			'label'       => esc_html__( 'Rate limiting', 'bricks' ),
+			'type'        => 'checkbox',
+			'description' => esc_html__( 'Limit the number of webhook requests that can be sent per hour.', 'bricks' ),
+		];
+
+		$this->controls['webhookRateLimitRequests'] = [
+			'tab'         => 'content',
+			'group'       => 'webhook',
+			'label'       => esc_html__( 'Max requests per hour', 'bricks' ),
+			'type'        => 'number',
+			'min'         => 1,
+			'placeholder' => '60',
+			'description' => esc_html__( 'Maximum number of webhook requests allowed per hour.', 'bricks' ) . ' (' . esc_html__( 'Default', 'bricks' ) . ': 60)',
+			'required'    => [ 'webhookRateLimit', '=', true ],
+		];
+
+		$this->controls['webhookErrorIgnore'] = [
+			'tab'         => 'content',
+			'group'       => 'webhook',
+			'label'       => esc_html__( 'Continue on error', 'bricks' ),
+			'type'        => 'checkbox',
+			'description' => esc_html__( 'If enabled, form submission will succeed even if the webhook fails. Errors will be logged to the server error log.', 'bricks' ),
+		];
+
+		$this->controls['webhookErrorMessage'] = [
+			'tab'      => 'content',
+			'group'    => 'webhook',
+			'label'    => esc_html__( 'Error message', 'bricks' ),
+			'type'     => 'text',
+			'required' => [ 'webhookErrorIgnore', '=', false ],
+		];
+
 		// Group: Confirmation email (@since 1.7.2)
 
 		$this->controls['confirmationEmailDescription'] = [
@@ -1957,9 +2062,18 @@ class Element_Form extends Element {
 		$this->set_attribute( '_root', 'data-element-id', $this->id );
 
 		// Form inside loop: Store the loop object ID, so we can use it in the form submit logic (@since 1.11)
+
+		// NOTE: Will be 0, if we are in a popup AJAX call
 		$loop_id = Query::get_loop_object_id();
 		if ( $loop_id ) {
 			$this->set_attribute( '_root', 'data-loop-object-id', $loop_id );
+		}
+
+		// If it's REST call, and loop ID is not set (we are in popup), we try to set it to "post ID"
+		// This is needed for the form submit logic to work correctly (@since 2.0)
+		elseif ( bricks_is_rest_call() ) {
+			// If this is a REST call, we need to set the loop object ID to 0
+			$this->set_attribute( '_root', 'data-loop-object-id', get_the_ID() );
 		}
 
 		// Use form global element ID to store as form_id (@since 1.9.2)
@@ -2037,8 +2151,9 @@ class Element_Form extends Element {
 			// Honeypot field: Set attributes (@since 1.12.2)
 			if ( isset( $field['isHoneypot'] ) ) {
 
-				// Set autocomplete attribute to "nope" ("off" may not work in some browsers)
-				$field['autocomplete'] = 'nope';
+				// Set autocomplete attribute to "off" #86c368e99 (@since 2.0)
+				// Note: "nope" was used @pre 2.0, but was causing accessibility issues
+				$field['autocomplete'] = 'off';
 
 				// If the field is "select", we need to add "autocomplete" attribute even here
 				if ( $field['type'] === 'select' ) {
@@ -2145,6 +2260,13 @@ class Element_Form extends Element {
 				if ( isset( $field['max'] ) ) {
 					$this->set_attribute( "field-$index", 'max', $field['max'] );
 				}
+
+				// Set 'step' attribute value (@since 2.0)
+				$step = isset( $field['step'] ) ? $field['step'] : null;
+
+				if ( is_numeric( $step ) && $step > 0 ) {
+					$this->set_attribute( "field-$index", 'step', $step );
+				}
 			}
 
 			$this->set_attribute( "field-$index", 'id', "form-field-{$input_unique_id}" );
@@ -2230,13 +2352,19 @@ class Element_Form extends Element {
 				}
 			}
 
-			// Max. length support (same as placeholder, without datepicker)
-			$max_length_support = array_diff( $placeholder_support, [ 'datepicker' ] );
+			// Min/max. length support (same as placeholder, without datepicker)
+			$min_max_length_support = array_diff( $placeholder_support, [ 'datepicker' ] );
 
-			if ( in_array( $field['type'], $max_length_support ) ) {
+			if ( in_array( $field['type'], $min_max_length_support ) ) {
+				$min_length = $field['minLength'] ?? false;
 				$max_length = $field['maxLength'] ?? false;
 
-				// Ensure max_length is an positive integer
+				// Ensure min_length is a positive integer
+				if ( ! is_numeric( $min_length ) || $min_length < 0 ) {
+					$min_length = false;
+				}
+
+				// Ensure max_length is a positive integer
 				if ( ! is_numeric( $max_length ) || $max_length < 0 ) {
 					$max_length = false;
 				}
@@ -2248,6 +2376,11 @@ class Element_Form extends Element {
 
 				if ( $max_length !== false ) {
 					$this->set_attribute( "field-$index", 'maxlength', $max_length );
+				}
+
+				// @since 2.0
+				if ( $min_length !== false ) {
+					$this->set_attribute( "field-$index", 'minlength', $min_length );
 				}
 			}
 
@@ -2351,7 +2484,7 @@ class Element_Form extends Element {
 				}
 
 				if ( in_array( $field['type'], $input_types, true ) ) {
-					if ( ! empty( $field['passwordToggle'] ) ) { // @since 1.12
+					if ( $field['type'] === 'password' && ! empty( $field['passwordToggle'] ) ) { // @since 1.12
 						echo '<div class="password-input-wrapper">';
 					}
 

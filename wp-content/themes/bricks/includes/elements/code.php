@@ -11,7 +11,10 @@ class Element_Code extends Element {
 	public $scripts  = [ 'bricksPrettify' ];
 
 	public function enqueue_scripts() {
-		if ( ! empty( $this->settings['prettify'] ) || ! empty( $this->theme_styles['prettify'] ) ) {
+		// Load prettify scripts and styles if code execution is not enabled (@since 2.0)
+		if ( ! isset( $this->settings['executeCode'] ) &&
+			( ! empty( $this->settings['prettify'] ) || ! empty( $this->theme_styles['prettify'] ) )
+		) {
 			wp_enqueue_script( 'bricks-prettify' );
 			wp_enqueue_style( 'bricks-prettify' );
 		}
@@ -64,7 +67,11 @@ class Element_Code extends Element {
 		// Code execution not allowed
 		else {
 			$this->controls['infoExecuteCodeOff'] = [
-				'content' => esc_html__( 'Code execution not allowed.', 'bricks' ) . ' ' . esc_html__( 'You can manage code execution permissions under: Bricks > Settings > Builder Access > Code Execution', 'bricks' ),
+				// translators: %s: 'Bricks settings path'
+				'content' => '<strong>' . esc_html__( 'Code execution not allowed.', 'bricks' ) . '</strong> ' . sprintf(
+					esc_html__( 'You can manage code execution permissions under: %s', 'bricks' ),
+					'<a href="' . admin_url( 'admin.php?page=bricks-settings#tab-custom-code' ) . '" target="_blank">Bricks > ' . esc_html__( 'Settings', 'bricks' ) . ' > ' . esc_html__( 'Custom code', 'bricks' ) . ' > ' . esc_html__( 'Code execution', 'bricks' ) . '</a>'
+				),
 				'type'    => 'info',
 			];
 		}
@@ -172,7 +179,11 @@ class Element_Code extends Element {
 				return $this->render_element_placeholder(
 					[
 						'title'       => esc_html__( 'Code execution not allowed.', 'bricks' ),
-						'description' => esc_html__( 'You can manage code execution permissions under: Bricks > Settings > Builder Access > Code Execution', 'bricks' )
+						// translators: %s: 'Bricks settings path'
+						'description' => esc_html__( 'Code execution not allowed.', 'bricks' ) . ' ' . sprintf(
+							esc_html__( 'You can manage code execution permissions under: %s', 'bricks' ),
+							'Bricks > ' . esc_html__( 'Settings', 'bricks' ) . ' > ' . esc_html__( 'Custom code', 'bricks' ) . ' > ' . esc_html__( 'Code execution', 'bricks' )
+						),
 					]
 				);
 			}

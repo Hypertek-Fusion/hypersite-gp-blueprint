@@ -39,55 +39,58 @@ class Popups {
 	 */
 	public static function set_controls() {
 		self::$controls['popupPadding'] = [
-			'group' => 'popup',
-			'label' => esc_html__( 'Padding', 'bricks' ),
-			'type'  => 'spacing',
-			'css'   => [
+			'group'    => 'popup',
+			'label'    => esc_html__( 'Padding', 'bricks' ),
+			'type'     => 'spacing',
+			'css'      => [
 				[
 					'property' => 'padding',
 					'selector' => '&.brx-popup',
 				],
 			],
+			'required' => [ 'popupIsInfoBox', '!=', true ],
 		];
 
 		self::$controls['popupJustifyConent'] = [
-			'group'   => 'popup',
-			'label'   => esc_html__( 'Align main axis', 'bricks' ),
-			'tooltip' => [
+			'group'    => 'popup',
+			'label'    => esc_html__( 'Align main axis', 'bricks' ),
+			'tooltip'  => [
 				'content'  => 'justify-content',
 				'position' => 'top-left',
 			],
-			'type'    => 'justify-content',
-			'inline'  => true,
-			'exclude' => [
+			'type'     => 'justify-content',
+			'inline'   => true,
+			'exclude'  => [
 				'space',
 			],
-			'css'     => [
+			'css'      => [
 				[
 					'property' => 'justify-content',
 					'selector' => '&.brx-popup',
 				],
 			],
+			'required' => [ 'popupIsInfoBox', '!=', true ],
 		];
 
 		self::$controls['popupAlignItems'] = [
-			'group'   => 'popup',
-			'label'   => esc_html__( 'Align cross axis', 'bricks' ),
-			'tooltip' => [
+			'group'    => 'popup',
+			'label'    => esc_html__( 'Align cross axis', 'bricks' ),
+			'tooltip'  => [
 				'content'  => 'align-items',
 				'position' => 'top-left',
 			],
-			'type'    => 'align-items',
-			'inline'  => true,
-			'exclude' => [
+			'type'     => 'align-items',
+			'inline'   => true,
+			'exclude'  => [
 				'stretch',
 			],
-			'css'     => [
+			'css'      => [
 				[
 					'property' => 'align-items',
 					'selector' => '&.brx-popup',
 				],
 			],
+			'required' => [ 'popupIsInfoBox', '!=', true ],
 		];
 
 		self::$controls['popupCloseOn'] = [
@@ -101,6 +104,7 @@ class Popups {
 				'none'     => esc_html__( 'None', 'bricks' ),
 			],
 			'placeholder' => esc_html__( 'Backdrop', 'bricks' ) . ' & ESC',
+			'required'    => [ 'popupIsInfoBox', '!=', true ],
 		];
 
 		self::$controls['popupZindex'] = [
@@ -114,12 +118,14 @@ class Popups {
 				],
 			],
 			'placeholder' => 10000,
+			'required'    => [ 'popupIsInfoBox', '!=', true ],
 		];
 
 		self::$controls['popupBodyScroll'] = [
-			'group' => 'popup',
-			'label' => esc_html__( 'Scroll', 'bricks' ) . ' (body)',
-			'type'  => 'checkbox',
+			'group'    => 'popup',
+			'label'    => esc_html__( 'Scroll', 'bricks' ) . ' (body)',
+			'type'     => 'checkbox',
+			'required' => [ 'popupIsInfoBox', '!=', true ],
 		];
 
 		/**
@@ -134,6 +140,7 @@ class Popups {
 			'label'       => esc_html__( 'Scroll to top', 'bricks' ),
 			'type'        => 'checkbox',
 			'description' => esc_html__( 'Scroll to top of popup when popup opens.', 'bricks' ),
+			'required'    => [ 'popupIsInfoBox', '!=', true ],
 		];
 
 		/**
@@ -146,6 +153,25 @@ class Popups {
 			'label'       => esc_html__( 'Disable auto focus', 'bricks' ),
 			'type'        => 'checkbox',
 			'description' => esc_html__( 'Don\'t focus on first focusable element inside popup when popup opens.', 'bricks' ),
+			'required'    => [ 'popupIsInfoBox', '!=', true ],
+		];
+
+		// Info Box popup (@since 2.0)
+		self::$controls['popupIsInfoBox'] = [
+			'group'       => 'popup',
+			'label'       => esc_html__( 'Info Box', 'bricks' ) . ' (' . esc_html__( 'Map', 'bricks' ) . ')',
+			'type'        => 'checkbox',
+			'description' => esc_html__( 'Enable if this popup template is for a map "Info Box".', 'bricks' ),
+		];
+
+		// Info Box width (@since 2.0)
+		self::$controls['popupInfoBoxWidth'] = [
+			'group'       => 'popup',
+			'label'       => esc_html__( 'Width', 'bricks' ) . ' (px)',
+			'type'        => 'number',
+			'placeholder' => 300,
+			'required'    => [ 'popupIsInfoBox', '=', true ],
+			'description' => esc_html__( 'Outer width of the info box popup.', 'bricks' ),
 		];
 
 		/**
@@ -167,7 +193,10 @@ class Popups {
 				'label'       => 'WooCommerce ' . esc_html__( 'Quick View', 'bricks' ),
 				'type'        => 'checkbox',
 				'description' => esc_html__( 'Tick if this popup is for WooCommerce Quick View.', 'bricks' ),
-				'required'    => [ 'popupAjax', '=', true ],
+				'required'    => [
+					[ 'popupAjax', '=', true ],
+					[ 'popupIsInfoBox', '!=', true ],
+				],
 			];
 		}
 
@@ -229,6 +258,7 @@ class Popups {
 			'type'        => 'separator',
 			'label'       => esc_html__( 'Breakpoints', 'bricks' ),
 			'description' => esc_html__( 'Choose at which breakpoint do you want to start showing this popup or on which specific breakpoints.', 'bricks' ),
+			'required'    => [ 'popupIsInfoBox', '!=', true ],
 		];
 
 		$breakpoints         = self::get_breakpoints();
@@ -244,6 +274,7 @@ class Popups {
 			],
 			'placeholder' => esc_html__( 'Start display at breakpoint', 'bricks' ),
 			'themeStyle'  => true,
+			'required'    => [ 'popupIsInfoBox', '!=', true ],
 		];
 
 		self::$controls['popupShowAt'] = [
@@ -251,8 +282,11 @@ class Popups {
 			'type'        => 'select',
 			'options'     => $breakpoints_options,
 			'placeholder' => esc_html__( 'Any breakpoint', 'bricks' ),
-			'required'    => [ 'popupBreakpointMode', '!=', 'on' ],
 			'themeStyle'  => true,
+			'required'    => [
+				[ 'popupBreakpointMode', '!=', 'on' ],
+				[ 'popupIsInfoBox', '!=', true ],
+			],
 		];
 
 		self::$controls['popupShowOn'] = [
@@ -261,16 +295,20 @@ class Popups {
 			'multiple'    => true,
 			'options'     => $breakpoints_options,
 			'placeholder' => esc_html__( 'Any breakpoint', 'bricks' ),
-			'required'    => [ 'popupBreakpointMode', '=', 'on' ],
 			'themeStyle'  => true,
+			'required'    => [
+				[ 'popupBreakpointMode', '=', 'on' ],
+				[ 'popupIsInfoBox', '!=', true ],
+			],
 		];
 
 		// BACKDROP
 
 		self::$controls['popupBackdropSep'] = [
-			'group' => 'popup',
-			'label' => esc_html__( 'Backdrop', 'bricks' ),
-			'type'  => 'separator',
+			'group'    => 'popup',
+			'label'    => esc_html__( 'Backdrop', 'bricks' ),
+			'type'     => 'separator',
+			'required' => [ 'popupIsInfoBox', '!=', true ],
 		];
 
 		/**
@@ -295,6 +333,7 @@ class Popups {
 				],
 			],
 			'themeStyle' => true,
+			'required'   => [ 'popupIsInfoBox', '!=', true ],
 		];
 
 		self::$controls['popupBackground'] = [
@@ -308,7 +347,10 @@ class Popups {
 				],
 			],
 			'exclude'  => 'video',
-			'required' => [ 'popupDisableBackdrop', '!=', true ],
+			'required' => [
+				[ 'popupDisableBackdrop', '!=', true ],
+				[ 'popupIsInfoBox', '!=', true ],
+			],
 		];
 
 		// Backdrop transition
@@ -324,7 +366,10 @@ class Popups {
 					'selector' => '&.brx-popup .brx-popup-backdrop',
 				],
 			],
-			'required' => [ 'popupDisableBackdrop', '!=', true ],
+			'required' => [
+				[ 'popupDisableBackdrop', '!=', true ],
+				[ 'popupIsInfoBox', '!=', true ],
+			],
 		];
 
 		// CONTENT
@@ -350,7 +395,6 @@ class Popups {
 				'right'  => '30px',
 				'bottom' => '30px',
 				'left'   => '30px',
-
 			],
 		];
 
@@ -367,6 +411,32 @@ class Popups {
 			],
 		];
 
+		self::$controls['popupContentMinWidth'] = [
+			'group' => 'popup',
+			'label' => esc_html__( 'Min. width', 'bricks' ),
+			'type'  => 'number',
+			'units' => true,
+			'css'   => [
+				[
+					'property' => 'min-width',
+					'selector' => '.brx-popup-content',
+				],
+			],
+		];
+
+		self::$controls['popupContentMaxWidth'] = [
+			'group' => 'popup',
+			'label' => esc_html__( 'Max. width', 'bricks' ),
+			'type'  => 'number',
+			'units' => true,
+			'css'   => [
+				[
+					'property' => 'max-width',
+					'selector' => '.brx-popup-content',
+				],
+			],
+		];
+
 		self::$controls['popupContentHeight'] = [
 			'group' => 'popup',
 			'label' => esc_html__( 'Height', 'bricks' ),
@@ -375,6 +445,32 @@ class Popups {
 			'css'   => [
 				[
 					'property' => 'height',
+					'selector' => '.brx-popup-content',
+				],
+			],
+		];
+
+		self::$controls['popupContentMinHeight'] = [
+			'group' => 'popup',
+			'label' => esc_html__( 'Min. height', 'bricks' ),
+			'type'  => 'number',
+			'units' => true,
+			'css'   => [
+				[
+					'property' => 'min-height',
+					'selector' => '.brx-popup-content',
+				],
+			],
+		];
+
+		self::$controls['popupContentMaxHeight'] = [
+			'group' => 'popup',
+			'label' => esc_html__( 'Max. height', 'bricks' ),
+			'type'  => 'number',
+			'units' => true,
+			'css'   => [
+				[
+					'property' => 'max-height',
 					'selector' => '.brx-popup-content',
 				],
 			],
@@ -423,43 +519,48 @@ class Popups {
 			'type'        => 'separator',
 			'label'       => esc_html__( 'Popup limit', 'bricks' ),
 			'description' => esc_html__( 'Limit how often this popup appears.', 'bricks' ),
+			'required'    => [ 'popupIsInfoBox', '!=', true ],
 		];
 
 		self::$controls['popupLimitWindow'] = [
-			'group'   => 'popup',
-			'type'    => 'number',
-			'label'   => esc_html__( 'Per page load', 'bricks' ),
-			'tooltip' => [
+			'group'    => 'popup',
+			'type'     => 'number',
+			'label'    => esc_html__( 'Per page load', 'bricks' ),
+			'tooltip'  => [
 				'content'  => 'window.brx_popup_{id}_total',
 				'position' => 'top-left',
 			],
+			'required' => [ 'popupIsInfoBox', '!=', true ],
 		];
 
 		self::$controls['popupLimitSessionStorage'] = [
-			'group'   => 'popup',
-			'type'    => 'number',
-			'label'   => esc_html__( 'Per session', 'bricks' ),
-			'tooltip' => [
+			'group'    => 'popup',
+			'type'     => 'number',
+			'label'    => esc_html__( 'Per session', 'bricks' ),
+			'tooltip'  => [
 				'content'  => 'sessionStorage.brx_popup_{id}_total',
 				'position' => 'top-left',
 			],
+			'required' => [ 'popupIsInfoBox', '!=', true ],
 		];
 
 		self::$controls['popupLimitLocalStorage'] = [
-			'group'   => 'popup',
-			'type'    => 'number',
-			'label'   => esc_html__( 'Across sessions', 'bricks' ),
-			'tooltip' => [
+			'group'    => 'popup',
+			'type'     => 'number',
+			'label'    => esc_html__( 'Across sessions', 'bricks' ),
+			'tooltip'  => [
 				'content'  => 'localStorage.brx_popup_{id}_total',
 				'position' => 'top-left',
 			],
+			'required' => [ 'popupIsInfoBox', '!=', true ],
 		];
 
 		// @since 1.9.9
 		self::$controls['popupLimitTimeStorage'] = [
-			'group' => 'popup',
-			'type'  => 'number',
-			'label' => esc_html__( 'Show again after .. hours', 'bricks' ),
+			'group'    => 'popup',
+			'type'     => 'number',
+			'label'    => esc_html__( 'Show again after .. hours', 'bricks' ),
+			'required' => [ 'popupIsInfoBox', '!=', true ],
 		];
 	}
 
@@ -556,8 +657,44 @@ class Popups {
 			'class'         => [ 'brx-popup', "brxe-popup-{$popup_id}" ],
 		];
 
-		// Popup breakpoint mode (start show at OR show on) @since 1.9.4
-		$popup_breakpoint_mode = $popup_template_settings['popupBreakpointMode'] ?? Theme_Styles::$active_settings['popup']['popupBreakpointMode'] ?? 'at';
+		// Unset irrelevant settings if it is Map infoBox popup (@since 2.0)
+		if ( isset( $popup_template_settings['popupIsInfoBox'] ) ) {
+			unset( $popup_template_settings['popupBreakpointMode'] );
+			unset( $popup_template_settings['popupShowAt'] );
+			unset( $popup_template_settings['popupShowOn'] );
+			unset( $popup_template_settings['popupCloseOn'] );
+			unset( $popup_template_settings['popupZindex'] );
+			unset( $popup_template_settings['popupDisableBackdrop'] );
+			unset( $popup_template_settings['popupDisableAutoFocus'] );
+			unset( $popup_template_settings['popupScrollToTop'] );
+			unset( $popup_template_settings['popupIsWoo'] );
+			unset( $popup_template_settings['popupLimitWindow'] );
+			unset( $popup_template_settings['popupLimitSessionStorage'] );
+			unset( $popup_template_settings['popupLimitLocalStorage'] );
+			unset( $popup_template_settings['popupLimitTimeStorage'] );
+
+			// Needed when using bricksOpenPopup() JS function
+			$popup_template_settings['popupBodyScroll'] = true;
+
+			$info_box_width = isset( $popup_template_settings['popupInfoBoxWidth'] ) ? absint( $popup_template_settings['popupInfoBoxWidth'] ) : false;
+
+			// Add class and variable value when previewing the popup
+			if ( $is_popup_preview ) {
+				$attributes['class'][] = 'brx-infobox-popup-builder';
+
+				if ( $info_box_width ) {
+					$attributes['style'] = "--brx-info-box-width: {$info_box_width}px;";
+				}
+			}
+
+			// Set the width of the info box popup for the frontend
+			if ( $info_box_width ) {
+				$attributes['data-brx-infobox-width'] = $info_box_width;
+			}
+		}
+
+		// Popup breakpoint mode (start show at OR show on)
+		$popup_breakpoint_mode = $popup_template_settings['popupBreakpointMode'] ?? Theme_Styles::get_setting_by_key( 'popup', 'popupBreakpointMode' ) ?? 'at';
 
 		/**
 		 * STEP: Set the show at 'width' according to the selected breakpoint
@@ -566,7 +703,7 @@ class Popups {
 		 *
 		 * @since 1.9
 		 */
-		$show_popup_at_breakpoint = $popup_template_settings['popupShowAt'] ?? Theme_Styles::$active_settings['popup']['popupShowAt'] ?? false;
+		$show_popup_at_breakpoint = $popup_template_settings['popupShowAt'] ?? Theme_Styles::get_setting_by_key( 'popup', 'popupShowAt' ) ?? false;
 		if ( $popup_breakpoint_mode === 'at' && $show_popup_at_breakpoint ) {
 			$breakpoint = Breakpoints::get_breakpoint_by( 'key', $show_popup_at_breakpoint );
 
@@ -601,8 +738,7 @@ class Popups {
 		 *
 		 * @since 1.9.4
 		 */
-		$show_popup_on_breakpoints = $popup_template_settings['popupShowOn'] ?? Theme_Styles::$active_settings['popup']['popupShowOn'] ?? false;
-
+		$show_popup_on_breakpoints = $popup_template_settings['popupShowOn'] ?? Theme_Styles::get_setting_by_key( 'popup', 'popupShowOn' ) ?? false;
 		if ( $popup_breakpoint_mode === 'on' && is_array( $show_popup_on_breakpoints ) ) {
 			$breakpoints = bricks_is_frontend() ? self::get_breakpoints() : [];
 
@@ -848,7 +984,7 @@ class Popups {
 		$html .= '</div>';
 
 		// Popup backdrop, if not disabled (@since 1.9.8)
-		if ( ! isset( Theme_Styles::$active_settings['popup']['popupDisableBackdrop'] ) && ! isset( $popup_template_settings['popupDisableBackdrop'] ) ) {
+		if ( ! isset( $popup_template_settings['popupDisableBackdrop'] ) && ! Theme_Styles::get_setting_by_key( 'popup', 'popupDisableBackdrop' ) ) {
 			if ( Query::is_looping() ) {
 				/**
 				 * Support dynamic style in Popup settings (looping popup)
@@ -876,6 +1012,11 @@ class Popups {
 	 * @return void
 	 */
 	public static function render_popups() {
+		// Return: Popups are disabled through page settings (@since 2.0)
+		if ( Database::is_template_disabled( 'popup' ) ) {
+			return;
+		}
+
 		$popup_ids = Database::$active_templates['popup'];
 
 		$is_popup_preview = Templates::get_template_type() === 'popup';

@@ -34,13 +34,13 @@ if (window.bricksUtils) {
 	) {
 		// Get filterId
 		const filterId = filterInstance.filterId || false
+		const queryInstance = window.bricksData.queryLoopInstances[targetQueryId] || false
 
-		if (!filterId || !targetQueryId || !window.bricksData.queryLoopInstances[targetQueryId]) {
+		if (!filterId || !targetQueryId || !queryInstance) {
 			return
 		}
 
-		const targetIsLiveSearch =
-			window.bricksData.queryLoopInstances[targetQueryId]?.isLiveSearch || false
+		const targetIsLiveSearch = queryInstance?.isLiveSearch || false
 
 		// STEP: Register selectedFilters based on targetQueryId
 		if (!window.bricksData.selectedFilters[targetQueryId]) {
@@ -167,6 +167,12 @@ if (window.bricksUtils) {
 			window.bricksData.selectedFilters[targetQueryId] = {}
 		}
 
+		// Early return if query disabled URL params
+		if (queryInstance?.disableUrlParams) {
+			return
+		}
+
+		// Handle URL Params
 		if (targetIsLiveSearch) {
 			// Use current original full URL for pushState
 			newUrl = window.location.href
@@ -461,6 +467,52 @@ if (window.bricksUtils) {
 					console.log('bricksGetQueryResult:error', err)
 				}
 			})
+	}
+
+	// Get dynamic tags for a specific query - currently only active filters tags (@since 2.0)
+	window.bricksUtils.getDynamicTagsForParse = function (targetQueryId) {
+		const dynamicTags = []
+
+		// Retrive all dynamic tags from window.bricksData.activeFiltersCountInstances where targetQueryId is the same
+		const activeFiltersCountDDs = Object.values(
+			window.bricksData.activeFiltersCountInstances
+		).filter((instance) => {
+			// targetQueryId is same and dynamicTag starts with active_filters_count
+			return (
+				instance?.targetQueryId === targetQueryId &&
+				instance?.dynamicTag.startsWith('active_filters_count')
+			)
+		})
+
+		activeFiltersCountDDs.forEach((instance) => {
+			dynamicTags.push(instance.dynamicTag)
+		})
+
+		return dynamicTags
+	}
+
+	// Update parsed dynamic tags for a specific query (@since 2.0)
+	window.bricksUtils.updateParsedDynamicTags = function (targetQueryId, parsedDynamicTags) {
+		// Retrive all dynamic tags from window.bricksData.activeFiltersCountInstances where targetQueryId is the same
+		const activeFiltersCountDDs = Object.values(
+			window.bricksData.activeFiltersCountInstances
+		).filter((instance) => {
+			// targetQueryId is same and dynamicTag starts with active_filters_count
+			return (
+				instance?.targetQueryId === targetQueryId &&
+				instance?.dynamicTag.startsWith('active_filters_count')
+			)
+		})
+
+		// Loop through all activeFiltersCountDDs and find the dynamicTag in parsedDynamicTags, update the element innerHTML if found
+		activeFiltersCountDDs.forEach((instance) => {
+			const dynamicTag = instance.dynamicTag
+			const element = instance.element
+
+			if (parsedDynamicTags[dynamicTag] && element.isConnected) {
+				element.innerHTML = parsedDynamicTags[dynamicTag]
+			}
+		})
 	}
 }
 
@@ -1108,9 +1160,8 @@ const bricksRangeFilterFn = new BricksFunction({
 						? rangeInput.value
 						: filterElement.querySelector('input.max[type="number"]').value || 0
 
-				// Convert rangeValueLow and rangeValueHigh to float
-				rangeValueLow = parseInt(rangeValueLow)
-				rangeValueHigh = parseInt(rangeValueHigh)
+				rangeValueLow = parseFloat(rangeValueLow)
+				rangeValueHigh = parseFloat(rangeValueHigh)
 
 				// Must be a number
 				if (isNaN(rangeValueLow) || isNaN(rangeValueHigh)) {
@@ -1136,6 +1187,11 @@ const bricksRangeFilterFn = new BricksFunction({
 					rangeValueLow = filterInstance.max
 					rangeInput.value = rangeValueLow
 				}
+
+				// Decimal format (Must after min and max check) (@since 2.0)
+				// if (filterInstance?.decimalPlaces) {
+				// 	rangeInput.value = parseFloat(rangeInput.value).toFixed(filterInstance.decimalPlaces)
+				// }
 
 				let rangeValue = [rangeValueLow, rangeValueHigh]
 
@@ -1208,8 +1264,8 @@ function bricksRangeValueUpdater() {
 				}
 
 				// Get min and max value
-				const minVal = parseInt(minInput.value) || 0
-				const maxVal = parseInt(maxInput.value) || 0
+				const minVal = parseFloat(minInput.value) || 0
+				const maxVal = parseFloat(maxInput.value) || 0
 
 				// Update currentValue
 				filter.currentValue = [minVal, maxVal]
@@ -1252,7 +1308,15 @@ const bricksRangeSliderUIFn = new BricksFunction({
 			const valueWrapper = filterElement.querySelector(`.value-wrap .${rangeInputType} .value`)
 			if (valueWrapper) {
 				// Ensure rangeValue is an integer
-				rangeValue = parseInt(rangeValue) || 0
+				rangeValue = parseFloat(rangeValue) || 0
+
+				if (filterInstance?.decimalPlaces) {
+					rangeValue = rangeValue.toLocaleString('en-US', {
+						minimumFractionDigits: filterInstance.decimalPlaces, // Always show two decimal places
+						maximumFractionDigits: filterInstance.decimalPlaces // Limit to two decimal places
+					})
+				}
+
 				// Check if the filterInstance has thousands and separator
 				if (filterInstance?.thousands && filterInstance?.separator) {
 					rangeValue = rangeValue.toLocaleString('en-US').replaceAll(',', filterInstance?.separator)
@@ -1283,8 +1347,8 @@ const bricksRangeSliderUIFn = new BricksFunction({
 				}
 
 				// Get the min and max value from the input[type="range"]
-				let filterMin = parseInt(minInput.getAttribute('min') || 0)
-				let filterMax = parseInt(maxInput.getAttribute('max') || 0)
+				let filterMin = parseFloat(minInput.getAttribute('min') || 0)
+				let filterMax = parseFloat(maxInput.getAttribute('max') || 0)
 
 				// Avoid division by zero
 				if (filterMin === filterMax) {
@@ -1329,7 +1393,7 @@ const bricksRangeSliderUIFn = new BricksFunction({
 		// Listen to the range input event to update the Text in .value-wrap .upper or .lower
 		rangeInput.addEventListener('input', function (e) {
 			// Get the range value
-			const rangeValue = parseInt(e.target.value) || 0
+			const rangeValue = parseFloat(e.target.value) || 0
 			const rangeInputType = rangeInput.classList.contains('min') ? 'lower' : 'upper'
 
 			// Update the text
@@ -1355,8 +1419,8 @@ const bricksRangeSliderUIFn = new BricksFunction({
 					: filterElement.querySelector('input.max[type="range"]').value || 0
 
 			// Convert rangeValueLow and rangeValueHigh to float
-			rangeValueLow = parseInt(rangeValueLow)
-			rangeValueHigh = parseInt(rangeValueHigh)
+			rangeValueLow = parseFloat(rangeValueLow)
+			rangeValueHigh = parseFloat(rangeValueHigh)
 
 			// Tweak the rangeValueLow and rangeValueHigh
 			if (rangeValueLow > rangeValueHigh) {
@@ -2098,6 +2162,54 @@ function bricksFiltersA11yHandler() {
 }
 
 /**
+ *
+ * @since 2.0
+ */
+const bricksActiveFiltersCountDDFn = new BricksFunction({
+	parentNode: document,
+	selector: 'span[data-brx-af-count][data-brx-af-dd]',
+	frontEndOnly: true,
+	eachElement: (element) => {
+		const dynamicTag = element.dataset.brxAfDd || false
+		const targetQueryId = element.dataset.brxAfCount || false
+
+		if (!targetQueryId || !dynamicTag) {
+			return
+		}
+
+		// STEP: Save each registered elements in window.bricksData.activeFiltersCountInstances
+		if (!window.bricksData.activeFiltersCountInstances) {
+			window.bricksData.activeFiltersCountInstances = []
+		}
+
+		// Check if this element already exists in window.bricksData.activeFiltersCountInstances
+		let foundInstance = window.bricksData.activeFiltersCountInstances.find((instance) => {
+			return instance.element === element
+		})
+
+		if (foundInstance) {
+			// Remove data-brx-af-dd
+			element.removeAttribute('data-brx-af-dd')
+			return
+		}
+
+		// Register instance
+		window.bricksData.activeFiltersCountInstances.push({
+			element: element,
+			targetQueryId: targetQueryId,
+			dynamicTag: dynamicTag
+		})
+
+		// Set data-brx-af-dd to true, beautify
+		element.dataset.brxAfDd = true
+	}
+})
+
+function bricksActiveFiltersCountDD() {
+	bricksActiveFiltersCountDDFn.run()
+}
+
+/**
  * Live search wrapper listeners
  * Logic to show/hide the [data-brx-ls-wrapper] based certain conditions
  */
@@ -2538,12 +2650,16 @@ function bricksFilterOptionsInteractions() {
 					break
 
 				case 'select':
-					totalOptions = filter.filterElement.querySelectorAll(':scope > option')?.length
+					totalOptions = filter.filterElement.querySelectorAll(
+						':scope > option:not(.placeholder)'
+					)?.length // Exclude the "placeholder" option (@since 2.0)
 					break
 
 				// Radio and checkbox filter types
 				default:
-					totalOptions = filter.filterElement.querySelectorAll(':scope > li')?.length
+					totalOptions = filter.filterElement.querySelectorAll(
+						':scope > li:not(.brx-option-all)'
+					)?.length // Exclude the "All" option (@since 2.0)
 					break
 			}
 
@@ -2596,6 +2712,7 @@ document.addEventListener('DOMContentLoaded', function (event) {
 	bricksCheckboxFilter()
 	bricksDatePickerFilter()
 	bricksActiveFilter() // @since 1.11
+	bricksActiveFiltersCountDD() // @since 2.0
 
 	bricksDisableFiltersOnLoad()
 	bricksInitBrowserState() // @since 1.11

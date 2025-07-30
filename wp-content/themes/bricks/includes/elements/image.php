@@ -298,6 +298,14 @@ class Element_Image extends Element {
 			'description' => esc_html__( 'Images of the same lightbox ID are grouped together.', 'bricks' ),
 		];
 
+		$this->controls['lightboxCropped'] = [
+			'tab'      => 'content',
+			'label'    => esc_html__( 'Lightbox', 'bricks' ) . ': ' . esc_html__( 'Cropped', 'bricks' ),
+			'desc'     => esc_html__( 'Enable if image is cropped for a smooth lightbox image transition.', 'bricks' ),
+			'type'     => 'checkbox',
+			'required' => [ 'link', '=', 'lightbox' ],
+		];
+
 		$this->controls['lightboxPadding'] = [
 			'tab'      => 'content',
 			'label'    => esc_html__( 'Lightbox', 'bricks' ) . ': ' . esc_html__( 'Padding', 'bricks' ) . ' (px)',
@@ -429,16 +437,18 @@ class Element_Image extends Element {
 		];
 
 		$this->controls['popupIconTransition'] = [
-			'label'    => esc_html__( 'Icon transition', 'bricks' ),
-			'type'     => 'text',
-			'inline'   => true,
-			'css'      => [
+			'label'          => esc_html__( 'Icon transition', 'bricks' ),
+			'type'           => 'text',
+			'inline'         => true,
+			'hasDynamicData' => false,
+			'hasVariables'   => true,
+			'css'            => [
 				[
 					'property' => 'transition',
 					'selector' => '&{pseudo} .icon',
 				],
 			],
-			'required' => [ 'popupIcon', '!=', '' ],
+			'required'       => [ 'popupIcon', '!=', '' ],
 		];
 
 		// Image masking (@since 1.8.5)
@@ -571,11 +581,47 @@ class Element_Image extends Element {
 
 			// Dynamic data mask image
 			elseif ( ! empty( $settings['maskCustom']['useDynamicData'] ) ) {
-				$image_src = $this->render_dynamic_data_tag( $settings['maskCustom']['useDynamicData'], 'image' );
+				$rendered = $this->render_dynamic_data_tag( $settings['maskCustom']['useDynamicData'], 'image' );
 
-				// Extract URL from the image tag 'src' attribute
-				preg_match( '/src="([^"]*)"/', $image_tag, $matches );
-				$mask_url = ! empty( $matches[1] ) ? $matches[1] : '';
+				// STEP: Get the first image from the array or value itself (@since 2.0)
+				$item = null;
+
+				// If item is not an array, assign it
+				if ( ! is_array( $rendered ) ) {
+					$item = $rendered;
+				}
+
+				// If item is an array, get the first element, if exists
+				elseif ( is_array( $rendered ) && ! empty( $rendered[0] ) ) {
+					$item = $rendered[0];
+				}
+
+				// STEP: Get the URL (@since 2.0)
+
+				// If item is number, get the URL from the attachment ID
+				if ( is_numeric( $item ) ) {
+					$image_src = wp_get_attachment_image_src( $item, 'full' );
+					$mask_url  = ! empty( $image_src[0] ) ? $image_src[0] : '';
+				}
+
+				// If item contains "src" attribute, extract the URL
+				elseif ( is_string( $item ) && strpos( $item, 'src=' ) !== false ) {
+					// Extract URL from the image tag 'src' attribute
+					preg_match( '/src="([^"]*)"/', $item, $matches );
+					$mask_url = ! empty( $matches[1] ) ? $matches[1] : '';
+				}
+
+				// If item contains "href" attribute, extract the URL
+				elseif ( is_string( $item ) && strpos( $item, 'href=' ) !== false ) {
+					// Extract URL from the image tag 'href' attribute
+					preg_match( '/href="([^"]*)"/', $item, $matches );
+					$mask_url = ! empty( $matches[1] ) ? $matches[1] : '';
+				}
+
+				// If item is a string, assign it directly
+				elseif ( is_string( $item ) ) {
+					$mask_url = $item;
+				}
 			}
 
 			// Custom URL image mask
@@ -920,6 +966,19 @@ class Element_Image extends Element {
 					if ( $lightbox_caption ) {
 						$this->set_attribute( 'link', 'data-lightbox-caption', esc_attr( $lightbox_caption ) );
 					}
+				}
+
+				/**
+				 * Add 'data-cropped' attribute if lightboxCropped is set
+				 *
+				 * Needed for PhotoSwipe lightbox to work correctly with cropped images.
+				 *
+				 * https://photoswipe.com/getting-started/#required-html-markup
+				 *
+				 * @since 2.0
+				 */
+				if ( isset( $settings['lightboxCropped'] ) ) {
+					$this->set_attribute( 'link', 'data-cropped', 'true' );
 				}
 			}
 

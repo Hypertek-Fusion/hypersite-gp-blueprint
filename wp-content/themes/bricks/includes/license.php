@@ -100,6 +100,7 @@ class License {
 			[
 				'active',       // Active license
 				'processed',    // Order processed
+				'canceled',     // Subscription cancelled, but not 'refunded' (@since 2.0)
 				'past_due',     // Payment past due (subscription)
 				'error_remote', // Remote server error (bricksbuilder.io)
 			]
@@ -201,7 +202,7 @@ class License {
 		if ( $is_ajax ) {
 			Ajax::verify_nonce( 'bricks-nonce-admin' );
 
-			if ( ! Capabilities::current_user_has_full_access() ) {
+			if ( ! current_user_can( 'manage_options' ) ) {
 				wp_send_json_error( 'verify_request: Sorry, you are not allowed to perform this action.' );
 			}
 
@@ -348,7 +349,7 @@ class License {
 		Ajax::verify_nonce( 'bricks-nonce-admin' );
 
 		// Only a user with full access can deactivate the license (@since 1.5.4)
-		if ( ! Capabilities::current_user_has_full_access() ) {
+		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_send_json_error( 'verify_request: Sorry, you are not allowed to perform this action.' );
 		}
 
@@ -396,7 +397,12 @@ class License {
 		?>
 		<div class="notice notice-info notice-license-activation">
 			<div class="content-wrapper">
-				<h4 class="title"><?php esc_html_e( 'Welcome to Bricks', 'bricks' ); ?></h4>
+				<h4 class="title">
+					<?php
+					// translators: %s is the name of the theme.
+					echo sprintf( esc_html__( 'Welcome to %s', 'bricks' ), 'Bricks' );
+					?>
+				</h4>
 				<p><?php echo esc_html__( 'Activate your license to edit with Bricks, receive one-click updates, and access to all community templates.', 'bricks' ); ?></p>
 			</div>
 

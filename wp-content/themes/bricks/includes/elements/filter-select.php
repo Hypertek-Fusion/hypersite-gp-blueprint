@@ -24,6 +24,7 @@ class Filter_Select extends Filter_Element {
 			unset( $filter_controls['fieldCompareOperator']['options']['NOT IN'] );
 			unset( $filter_controls['fieldCompareOperator']['options']['BETWEEN'] );
 			unset( $filter_controls['fieldCompareOperator']['options']['NOT BETWEEN'] );
+
 			$this->controls = array_merge( $this->controls, $filter_controls );
 		}
 
@@ -92,22 +93,8 @@ class Filter_Select extends Filter_Element {
 			}
 
 			$this->prepare_sources();
-
-			// User wish to use what options as filter options
-			switch ( $settings['filterSource'] ) {
-				case 'taxonomy':
-					$this->set_data_source_from_taxonomy();
-					break;
-				case 'wpField':
-					$this->set_data_source_from_wp_field();
-					break;
-				case 'customField':
-					$this->set_data_source_from_custom_field();
-					break;
-			}
-
+			$this->set_data_source();
 			$this->set_options_with_count();
-
 		}
 
 		elseif ( $filter_action === 'sort' ) {

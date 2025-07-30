@@ -30,6 +30,10 @@ class Provider_Woo extends Base {
 	public function get_tags_config() {
 		$tags = [
 			// Product
+			'woo_product_type'           => [
+				'label' => esc_html__( 'Product type', 'bricks' ),
+				'group' => esc_html__( 'Product', 'bricks' ),
+			],
 			'woo_product_price'          => [
 				'label' => esc_html__( 'Product price', 'bricks' ),
 				'group' => esc_html__( 'Product', 'bricks' ),
@@ -169,6 +173,10 @@ class Provider_Woo extends Base {
 		$render = isset( $this->tags[ $tag ]['render'] ) ? $this->tags[ $tag ]['render'] : str_replace( 'woo_', '', $tag );
 
 		switch ( $render ) {
+			case 'product_type':
+				$value = $product ? $product->get_type() : '';
+				break;
+
 			case 'product_price':
 				$loop_object_type = \Bricks\Query::is_looping() ? \Bricks\Query::get_query_object_type() : false;
 
@@ -424,7 +432,7 @@ class Provider_Woo extends Base {
 						'woocommerce_cart_item_remove_link',
 						sprintf(
 							// translators: %s Product name.
-							'<a href="%s" class="remove" aria-label="%s" data-product_id="%s" data-product_sku="%s">&times;</a>',
+							'<a role="button" href="%s" class="remove" aria-label="%s" data-product_id="%s" data-product_sku="%s">&times;</a>',
 							esc_url( wc_get_cart_remove_url( $cart_item_key ) ),
 							// translators: %s Product name.
 							esc_attr( sprintf( __( 'Remove %s from cart', 'woocommerce' ), wp_strip_all_tags( $_product_name ) ) ),

@@ -137,7 +137,7 @@ class Element_Accordion extends Element {
 			'css'      => [
 				[
 					'property' => 'font',
-					'selector' => '.accordion-title{pseudo} .icon', // NOTE: Undocumented (@since 1.3.5)
+					'selector' => '.accordion-title{pseudo} .icon', // NOTE: Undocumented
 				],
 			],
 			'required' => [ 'icon.icon', '!=', '' ],

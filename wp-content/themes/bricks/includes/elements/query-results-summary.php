@@ -40,7 +40,7 @@ class Query_Results_Summary extends Element {
 		];
 
 		$this->controls['noResultsText'] = [
-			'label'       => esc_html( 'Text', 'bricks' ) . ': ' . esc_html__( 'No Results', 'bricks' ),
+			'label'       => esc_html( 'Text', 'bricks' ) . ': ' . esc_html__( 'No results', 'bricks' ),
 			'type'        => 'text',
 			'placeholder' => esc_html__( 'No posts found', 'bricks' ),
 		];

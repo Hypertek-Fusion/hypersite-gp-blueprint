@@ -66,21 +66,7 @@ class Filter_Checkbox extends Filter_Element {
 		}
 
 		$this->prepare_sources();
-
-		switch ( $settings['filterSource'] ) {
-			case 'taxonomy':
-				$this->set_data_source_from_taxonomy();
-				break;
-
-			case 'wpField':
-				$this->set_data_source_from_wp_field();
-				break;
-
-			case 'customField':
-				$this->set_data_source_from_custom_field();
-				break;
-		}
-
+		$this->set_data_source();
 		$this->set_options_with_count();
 
 		// Insert filter settings as data-brx-filter attribute

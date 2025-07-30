@@ -280,57 +280,35 @@ class Element_Image_Gallery extends Element {
 			'required'    => [ 'link', '=', 'lightbox' ],
 			'description' => esc_html__( 'Images of the same lightbox ID are grouped together.', 'bricks' ),
 		];
-	}
 
-	public function get_normalized_image_settings( $settings ) {
-		$items = $settings['items'] ?? [];
-		$size  = $items['size'] ?? BRICKS_DEFAULT_IMAGE_SIZE;
+		// Attribute: fetchpriority (@since 2.0)
+		$this->controls['fetchpriorityAttribute'] = [
+			'tab'     => 'content',
+			'label'   => esc_html__( 'Fetch priority', 'bricks' ),
+			'inline'  => true,
+			'type'    => 'select',
+			'options' => [
+				'high' => esc_html__( 'High', 'bricks' ),
+				'low'  => esc_html__( 'Low', 'bricks' ),
+				'auto' => esc_html__( 'Auto', 'bricks' ),
+			],
+		];
 
-		// Dynamic data
-		if ( ! empty( $items['useDynamicData'] ) ) {
-			$items['images'] = [];
-
-			$images = $this->render_dynamic_data_tag( $items['useDynamicData'], 'image' );
-
-			if ( is_array( $images ) ) {
-				foreach ( $images as $image_id ) {
-					$items['images'][] = [
-						'id'   => $image_id,
-						'full' => wp_get_attachment_image_url( $image_id, 'full' ),
-						'url'  => wp_get_attachment_image_url( $image_id, $size )
-					];
-				}
-			}
-		}
-
-		// Old data structure (images were saved as one array directly on $items)
-		if ( ! isset( $items['images'] ) ) {
-			$images = ! empty( $items ) ? $items : [];
-
-			unset( $items );
-
-			$items['images'] = $images;
-		}
-
-		// Get 'size' from first image if not set
-		$first_image_size = ! empty( $items['images'][0]['size'] ) ? $items['images'][0]['size'] : false;
-		$size             = empty( $items['size'] ) && $first_image_size ? $first_image_size : $size;
-
-		// Get image 'url' for requested $size
-		foreach ( $items['images'] as $key => $image ) {
-			if ( ! empty( $image['id'] ) ) {
-				$items['images'][ $key ]['url'] = wp_get_attachment_image_url( $image['id'], $size );
-			}
-		}
-
-		$settings['items']         = $items;
-		$settings['items']['size'] = $size;
-
-		return $settings;
+		// Attribute: loading (@since 2.0)
+		$this->controls['loadingAttribute'] = [
+			'tab'     => 'content',
+			'label'   => esc_html__( 'Loading', 'bricks' ),
+			'inline'  => true,
+			'type'    => 'select',
+			'options' => [
+				'lazy'  => esc_html__( 'Lazy', 'bricks' ),
+				'eager' => esc_html__( 'Eager', 'bricks' ),
+			],
+		];
 	}
 
 	public function render() {
-		$settings = $this->get_normalized_image_settings( $this->settings );
+		$settings = Helpers::get_normalized_image_settings( $this, $this->settings );
 		$images   = $settings['items']['images'] ?? false;
 		$size     = $settings['items']['size'] ?? BRICKS_DEFAULT_IMAGE_SIZE;
 		$layout   = $settings['layout'] ?? 'grid';
@@ -492,13 +470,28 @@ class Element_Image_Gallery extends Element {
 			}
 
 			// STEP: Render image
-			$image_atts = [ 'class' => implode( ' ', $image_classes ) ];
+			$image_atts        = [ 'class' => implode( ' ', $image_classes ) ];
+			$image_atts_string = '';
+
+			// Set fetchpriority attribute (@since 2.0)
+			$attribute_fetchpriority = ! empty( $settings['fetchpriorityAttribute'] ) ? esc_attr( $settings['fetchpriorityAttribute'] ) : '';
+			if ( ! empty( $attribute_fetchpriority ) ) {
+				$image_atts['fetchpriority'] = $attribute_fetchpriority;
+				$image_atts_string          .= ' fetchpriority="' . $attribute_fetchpriority . '"';
+			}
+
+			// Set loading attribute (@since 2.0)
+			$attribute_loading = ! empty( $settings['loadingAttribute'] ) ? esc_attr( $settings['loadingAttribute'] ) : '';
+			if ( ! empty( $attribute_loading ) ) {
+				$image_atts['loading'] = $attribute_loading;
+				$image_atts_string    .= ' loading="' . $attribute_loading . '"';
+			}
 
 			if ( $image_id ) {
 				echo wp_get_attachment_image( $image_id, $size, false, $image_atts );
 			} elseif ( ! empty( $item['url'] ) && isset( $item['isPlaceholder'] ) && $item['isPlaceholder'] ) {
 				// Maybe is a temporary placeholder image in Bricks (@since 1.12.2)
-				echo '<img src="' . esc_url( $item['url'] ) . '" alt="" width="800" height="600" />';
+				echo '<img src="' . esc_url( $item['url'] ) . '" alt="" width="800" height="600"' . $image_atts_string . ' />';
 			}
 
 			if ( $close_a_tag ) {
@@ -528,8 +521,7 @@ class Element_Image_Gallery extends Element {
 	}
 
 	public function convert_element_settings_to_block( $settings ) {
-		$settings = $this->get_normalized_image_settings( $settings );
-
+		$settings   = Helpers::get_normalized_image_settings( $this, $settings );
 		$images     = ! empty( $settings['items']['images'] ) ? $settings['items']['images'] : false;
 		$image_size = $settings['items']['size'];
 

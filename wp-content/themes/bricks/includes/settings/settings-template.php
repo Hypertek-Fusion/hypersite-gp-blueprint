@@ -20,7 +20,10 @@ class Settings_Template extends Settings_Base {
 		}
 
 		$this->control_groups['template-conditions'] = [
-			'title' => esc_html__( 'Conditions', 'bricks' ),
+			'title'    => esc_html__( 'Conditions', 'bricks' ),
+			'required' => [
+				[ 'popupIsInfoBox', '!=', true ],
+			],
 		];
 
 		// Add password protection group for password protected templates (@since 1.11.1)
@@ -199,6 +202,62 @@ class Settings_Template extends Settings_Base {
 			],
 		];
 
+		// Background color of the sticky header when scrolling, on hover (@since 2.0)
+		$this->controls['headerStickyScrollingColorHover'] = [
+			'group'    => 'header',
+			'label'    => esc_html__( 'Scrolling text color', 'bricks' ) . ' (' . esc_html__( 'Hover', 'bricks' ) . ')',
+			'type'     => 'color',
+			'css'      => [
+				// Logo
+				[
+					'property' => 'color',
+					'selector' => '#brx-header.sticky.scrolling .brxe-logo:hover',
+				],
+
+				// Nav Menu
+				[
+					'property' => 'color',
+					'selector' => '#brx-header.sticky.scrolling .bricks-nav-menu > li > a:hover',
+				],
+				[
+					'property' => 'color',
+					'selector' => '#brx-header.sticky.scrolling .bricks-nav-menu > li > .brx-submenu-toggle:hover > *',
+				],
+				[
+					'property' => 'color',
+					'selector' => '#brx-header.sticky.scrolling .brxe-nav-menu .bricks-mobile-menu-toggle:hover',
+				],
+
+				// Nav (Nestable)
+				[
+					'property' => 'color',
+					'selector' => '#brx-header.sticky.scrolling .brx-nav-nested-items > li > a:hover',
+				],
+				[
+					'property' => 'color',
+					'selector' => '#brx-header.sticky.scrolling .brx-nav-nested-items > li > .brx-submenu-toggle:hover > *',
+				],
+				[
+					'property' => 'color',
+					'selector' => '#brx-header.sticky.scrolling .brxe-nav-nested > .brxe-toggle:hover .brxa-inner',
+				],
+
+				// // Search
+				// [
+				// 'property' => 'color',
+				// 'selector' => '#brx-header.sticky.scrolling .brxe-search',
+				// ],
+				[
+					'property' => 'color',
+					'selector' => '#brx-header.sticky.scrolling .brxe-search button:hover',
+				],
+			],
+			'required' => [
+				[ 'headerPosition', '=', '' ],
+				[ 'headerSticky', '!=', '' ],
+			],
+		];
+
 		$this->controls['headerStickyScrollingBackground'] = [
 			'group'    => 'header',
 			'label'    => esc_html__( 'Scrolling background', 'bricks' ),
@@ -337,11 +396,15 @@ class Settings_Template extends Settings_Base {
 			'label'       => esc_html__( 'Interactions', 'bricks' ),
 			'description' => esc_html__( 'Set interactions for this popup.', 'bricks' ),
 			'type'        => 'separator',
+			'required'    => [ 'popupIsInfoBox', '!=', true ],
 		];
 
 		// Control key: template_interactions
 		$this->controls['template_interactions']          = Interactions::get_controls_data();
 		$this->controls['template_interactions']['group'] = 'popup';
+
+		// Template interactions not for Info Box popup (@since 2.0)
+		$this->controls['template_interactions']['required'] = [ 'popupIsInfoBox', '!=', true ];
 
 		// Add special popup triggers
 		$this->controls['template_interactions']['fields']['trigger']['options']['popupGroupTitle'] = esc_html__( 'Popup', 'bricks' );
@@ -480,16 +543,6 @@ class Settings_Template extends Settings_Base {
 					'required' => [ 'main', '=', 'ids' ],
 				],
 
-				// @since 1.9.2 (TODO NEXT: Delete in Bricks 2.0)
-				'hookInfo'                    => [
-					'type'     => 'info',
-					'content'  => '"hook" is no longer a supported template condition as we improved the section hook feature in <a href="https://bricksbuilder.io/changelog/#v1.9.2" target="_blank">Bricks 1.9.2</a>. Please select a valid template condition from above.',
-					'bricks',
-					'required' => [
-						[ 'main', '=', 'hook' ],
-					],
-				],
-
 				// @since 1.9.1
 				'hookName'                    => [
 					'type'           => 'text',
@@ -576,24 +629,27 @@ class Settings_Template extends Settings_Base {
 		];
 
 		$this->controls['passwordProtectionExcludeHeader'] = [
-			'group'    => 'password-protected',
-			'type'     => 'checkbox',
-			'label'    => esc_html__( 'Disable header', 'bricks' ),
-			'required' => [ 'passwordProtectionSource', '!=', 'wordpress' ],
+			'group'      => 'password-protected',
+			'type'       => 'checkbox',
+			'label'      => esc_html__( 'Disable header', 'bricks' ),
+			'required'   => [ 'passwordProtectionSource', '!=', 'wordpress' ],
+			'deprecated' => true, // @since 2.0
 		];
 
 		$this->controls['passwordProtectionExcludeFooter'] = [
-			'group'    => 'password-protected',
-			'type'     => 'checkbox',
-			'label'    => esc_html__( 'Disable footer', 'bricks' ),
-			'required' => [ 'passwordProtectionSource', '!=', 'wordpress' ],
+			'group'      => 'password-protected',
+			'type'       => 'checkbox',
+			'label'      => esc_html__( 'Disable footer', 'bricks' ),
+			'required'   => [ 'passwordProtectionSource', '!=', 'wordpress' ],
+			'deprecated' => true, // @since 2.0
 		];
 
 		$this->controls['passwordProtectionExcludePopups'] = [
-			'group'    => 'password-protected',
-			'type'     => 'checkbox',
-			'label'    => esc_html__( 'Disable popups', 'bricks' ),
-			'required' => [ 'passwordProtectionSource', '!=', 'wordpress' ],
+			'group'      => 'password-protected',
+			'type'       => 'checkbox',
+			'label'      => esc_html__( 'Disable popups', 'bricks' ),
+			'required'   => [ 'passwordProtectionSource', '!=', 'wordpress' ],
+			'deprecated' => true, // @since 2.0
 		];
 
 		$this->controls['passwordProtectionBypassLoggedIn'] = [
@@ -658,7 +714,7 @@ class Settings_Template extends Settings_Base {
 			'label'       => esc_html__( 'Content type', 'bricks' ),
 			'options'     => $supported_content_types,
 			'searchable'  => true,
-			'placeholder' => esc_html__( 'Select content type', 'bricks' ),
+			'placeholder' => esc_html__( 'Search', 'bricks' ) . ' / ' . esc_html__( 'Select content type', 'bricks' ),
 		];
 
 		$this->controls['templatePreviewAuthor'] = [
@@ -669,7 +725,7 @@ class Settings_Template extends Settings_Base {
 				'action' => 'bricks_get_users',
 			],
 			'searchable'  => true,
-			'placeholder' => esc_html__( 'Select author', 'bricks' ),
+			'placeholder' => esc_html__( 'Search', 'bricks' ) . ' / ' . esc_html__( 'Select author', 'bricks' ),
 			'required'    => [ 'templatePreviewType', '=', 'archive-author' ],
 		];
 
@@ -679,7 +735,7 @@ class Settings_Template extends Settings_Base {
 			'label'       => esc_html__( 'Post type', 'bricks' ),
 			'options'     => $registered_post_types,
 			'searchable'  => true,
-			'placeholder' => esc_html__( 'Select post type', 'bricks' ),
+			'placeholder' => esc_html__( 'Search' ) . ' / ' . esc_html__( 'Select post type', 'bricks' ),
 			'required'    => [ 'templatePreviewType', '=', 'archive-cpt' ],
 		];
 
@@ -693,7 +749,7 @@ class Settings_Template extends Settings_Base {
 				'postTypes'             => [ 'any' ],
 				'addLanguageToTermName' => true,
 			], // (@since 1.12)
-			'placeholder' => esc_html__( 'Select term', 'bricks' ),
+			'placeholder' => esc_html__( 'Search', 'bricks' ) . ' / ' . esc_html__( 'Select term', 'bricks' ),
 			'required'    => [ 'templatePreviewType', '=', 'archive-term' ],
 		];
 
@@ -709,14 +765,14 @@ class Settings_Template extends Settings_Base {
 		$this->controls['templatePreviewPostId'] = [
 			'group'       => 'template-preview',
 			'type'        => 'select',
-			'label'       => esc_html__( 'Single post/page', 'bricks' ),
+			'label'       => esc_html__( 'Single', 'bricks' ) . ' (' . esc_html__( 'Post', 'bricks' ) . '/' . esc_html__( 'Page', 'bricks' ) . '/' . 'CPT' . ')',
 			'optionsAjax' => [
 				'action'                 => 'bricks_get_posts',
 				'postType'               => 'any',
 				'addLanguageToPostTitle' => true,
 			],
 			'searchable'  => true,
-			'placeholder' => esc_html__( 'Select', 'bricks' ),
+			'placeholder' => esc_html__( 'Search', 'bricks' ) . ' / ' . esc_html__( 'Select', 'bricks' ),
 			'required'    => [ 'templatePreviewType', '=', 'single' ],
 		];
 
